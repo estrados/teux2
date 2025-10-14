@@ -1,5 +1,6 @@
 package com.example.kitkat
 
+import android.content.Context
 import android.util.Log
 import com.google.gson.Gson
 import okhttp3.MediaType
@@ -23,6 +24,15 @@ object LogHelper {
 
     private val gson = Gson()
 
+    // Flag to control server logging
+    @Volatile
+    private var isDebugLoggingEnabled = true
+
+    fun setDebugLoggingEnabled(context: Context, enabled: Boolean) {
+        isDebugLoggingEnabled = enabled
+        Log.d(TAG, "Debug logging to server: ${if (enabled) "ENABLED" else "DISABLED"}")
+    }
+
     data class LogData(
         val method: String,
         val status: String,
@@ -32,8 +42,13 @@ object LogHelper {
     )
 
     fun log(method: String, status: String, message: String, responseTime: Long = 0, responseBody: String? = null) {
-        // Log to Logcat
+        // Always log to Logcat
         Log.d(TAG, "[$method] $status - $message (${responseTime}ms)")
+
+        // Only send to server if debug logging is enabled
+        if (!isDebugLoggingEnabled) {
+            return
+        }
 
         // Send to PHP server asynchronously
         Thread {

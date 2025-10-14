@@ -34,11 +34,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message
         );
 
-        // Add response body if present
+        // Add response body if present (but skip HTML responses)
         if ($responseBody !== null && $responseBody !== '') {
-            $logEntry .= "Response Body:\n";
-            $logEntry .= $responseBody . "\n";
-            $logEntry .= str_repeat('-', 80) . "\n";
+            // Skip HTML responses
+            $isHtml = (stripos($responseBody, '<!DOCTYPE') !== false) ||
+                      (stripos($responseBody, '<html') !== false) ||
+                      (stripos($responseBody, '<body') !== false);
+
+            if (!$isHtml) {
+                // Truncate if too long (max 1000 chars)
+                $bodyToLog = strlen($responseBody) > 1000
+                    ? substr($responseBody, 0, 1000) . '... (truncated)'
+                    : $responseBody;
+
+                $logEntry .= "Response Body:\n";
+                $logEntry .= $bodyToLog . "\n";
+                $logEntry .= str_repeat('-', 80) . "\n";
+            }
         }
 
         file_put_contents($logFile, $logEntry, FILE_APPEND);
