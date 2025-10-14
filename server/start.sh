@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Change this to match your server IP (must match LogHelper.kt SERVER_URL)
-SERVER_IP="192.168.1.11"
+SERVER_IP="192.168.1.25"
 SERVER_PORT="8080"
 
 # Start PHP logging server

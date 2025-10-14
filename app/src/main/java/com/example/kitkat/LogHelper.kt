@@ -14,7 +14,7 @@ object LogHelper {
 
     // Change this to your server IP (can be any 192.168.1.* address)
     // Then update server/start.sh with the same IP
-    private const val SERVER_URL = "http://192.168.1.11:8080"
+    private const val SERVER_URL = "http://192.168.1.25:8080"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
