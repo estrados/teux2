@@ -1,0 +1,31 @@
+
+[2025-10-14 14:30:52] Method: WebView | Status: INFO | Time: 0ms | Message: Step 1: Starting WebView (direct URL load)
+[2025-10-14 14:30:52] Method: WebView | Status: INFO | Time: 0ms | Message: Step 2: Creating WebView
+[2025-10-14 14:30:53] Method: WebView | Status: INFO | Time: 0ms | Message: Step 4: Setting up WebViewClient
+[2025-10-14 14:30:53] Method: WebView | Status: INFO | Time: 0ms | Message: Step 3: WebView created successfully
+[2025-10-14 14:30:53] Method: WebView | Status: INFO | Time: 0ms | Message: Step 5: Loading API URL directly: https://teuxdeux.com/api/v4/workspaces/444459/todos?since=2025-10-14&until=2025-10-20
+[2025-10-14 14:30:54] Method: WebView | Status: INFO | Time: 0ms | Message: Step 6: Page finished loading!
+[2025-10-14 14:30:54] Method: WebView | Status: SUCCESS | Time: 1828ms | Message: Step 7: JSON received: {\errors\:[{\code\:\missing-authorization\,\fields\:[],\message\:\Missing \\\Authorization\\\ in headers.\}]}
+...
+[2025-10-14 14:30:59] Method: CustomSSL | Status: INFO | Time: 0ms | Message: Step 1: Starting Custom SSL test
+[2025-10-14 14:30:59] Method: CustomSSL | Status: INFO | Time: 0ms | Message: Step 2: Creating TrustManager (accept all certs)
+[2025-10-14 14:30:59] Method: CustomSSL | Status: INFO | Time: 0ms | Message: Step 3: Initializing SSL context with TLS
+[2025-10-14 14:30:59] Method: CustomSSL | Status: INFO | Time: 0ms | Message: Step 5: Building HTTP request
+[2025-10-14 14:30:59] Method: CustomSSL | Status: INFO | Time: 0ms | Message: Step 4: Building OkHttp client
+[2025-10-14 14:31:00] Method: CustomSSL | Status: INFO | Time: 0ms | Message: Step 6: Executing API request to https://teuxdeux.com/api/v4/workspaces/444459/todos?since=2025-10-14&until=2025-10-20
+[2025-10-14 14:31:04] Method: CustomSSL | Status: ERROR | Time: 4327ms | Message: Step 7: Connection failed - SSLHandshakeException: javax.net.ssl.SSLProtocolException: SSL handshake aborted: ssl=0x619d63c0: Failure in SSL library, usually a protocol error
+error:1407742E:SSL routines:SSL23_GET_SERVER_HELLO:tlsv1 alert protocol version (external/openssl/ssl/s23_clnt.c:744 0x5e550d74:0x00000000)
+[2025-10-14 14:31:07] Method: WebViewProxy | Status: INFO | Time: 0ms | Message: Step 2: Creating WebView
+[2025-10-14 14:31:07] Method: WebViewProxy | Status: INFO | Time: 0ms | Message: Step 1: Starting WebView Proxy test
+[2025-10-14 14:31:07] Method: WebViewProxy | Status: INFO | Time: 0ms | Message: Step 3: WebView created successfully
+[2025-10-14 14:31:07] Method: WebViewProxy | Status: INFO | Time: 0ms | Message: Step 4: Adding JavaScript interface
+[2025-10-14 14:31:07] Method: WebViewProxy | Status: INFO | Time: 0ms | Message: Step 5: Setting up WebViewClient
+[2025-10-14 14:31:07] Method: WebViewProxy | Status: INFO | Time: 0ms | Message: Step 6: Loading with base URL to avoid CORS
+[2025-10-14 14:31:07] Method: WebViewProxy | Status: INFO | Time: 0ms | Message: Step 6: Page loaded, executing XMLHttpRequest
+[2025-10-14 14:31:07] Method: WebViewProxy | Status: INFO | Time: 0ms | Message: JS Console: Starting API request via WebView proxy...
+[2025-10-14 14:31:07] Method: WebViewProxy | Status: INFO | Time: 0ms | Message: JS Console: Step 7: Creating XMLHttpRequest
+[2025-10-14 14:31:07] Method: WebViewProxy | Status: INFO | Time: 0ms | Message: JS Console: Sending XHR request...
+[2025-10-14 14:31:07] Method: WebViewProxy | Status: INFO | Time: 0ms | Message: JS Console: Step 8: XHR onload, status: 401
+[2025-10-14 14:31:07] Method: WebViewProxy | Status: INFO | Time: 0ms | Message: JS Console: Response preview: {"errors":[{"code":"missing-authorization","fields":[],"message":"Missing \"Authorization\" in heade
+[2025-10-14 14:31:07] Method: WebViewProxy | Status: ERROR | Time: 763ms | Message: Step 8: HTTP 401: {"errors":[{"code":"missing-authorization","fields":[],"message":"Missing \"Authorization\" in headers."}]}
+
