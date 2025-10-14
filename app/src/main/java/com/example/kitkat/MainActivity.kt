@@ -123,7 +123,22 @@ class MainActivity : AppCompatActivity() {
         // Load saved credentials
         loadSavedCredentials()
 
+        // Auto-login if we have a valid auth token
+        checkAndAutoLogin()
+
         LogHelper.logInfo("APP", "MainActivity started - Login screen")
+    }
+
+    private fun checkAndAutoLogin() {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val savedAuthToken = prefs.getString(KEY_AUTH_TOKEN, "")
+
+        if (!savedAuthToken.isNullOrEmpty()) {
+            LogHelper.logInfo("LOGIN", "Found saved auth token, auto-redirecting to HomeActivity")
+            val intent = android.content.Intent(this, HomeActivity::class.java)
+            startActivity(intent)
+            finish()
+        }
     }
 
     private fun loadSavedCredentials() {
