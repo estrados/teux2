@@ -27,17 +27,18 @@ object LogHelper {
         val method: String,
         val status: String,
         val message: String,
-        val response_time: Long = 0
+        val response_time: Long = 0,
+        val response_body: String? = null
     )
 
-    fun log(method: String, status: String, message: String, responseTime: Long = 0) {
+    fun log(method: String, status: String, message: String, responseTime: Long = 0, responseBody: String? = null) {
         // Log to Logcat
         Log.d(TAG, "[$method] $status - $message (${responseTime}ms)")
 
         // Send to PHP server asynchronously
         Thread {
             try {
-                val logData = LogData(method, status, message, responseTime)
+                val logData = LogData(method, status, message, responseTime, responseBody)
                 val json = gson.toJson(logData)
 
                 val body = RequestBody.create(
@@ -60,15 +61,15 @@ object LogHelper {
         }.start()
     }
 
-    fun logSuccess(method: String, message: String, responseTime: Long) {
-        log(method, "SUCCESS", message, responseTime)
+    fun logSuccess(method: String, message: String, responseTime: Long, responseBody: String? = null) {
+        log(method, "SUCCESS", message, responseTime, responseBody)
     }
 
-    fun logError(method: String, message: String, responseTime: Long = 0) {
-        log(method, "ERROR", message, responseTime)
+    fun logError(method: String, message: String, responseTime: Long = 0, responseBody: String? = null) {
+        log(method, "ERROR", message, responseTime, responseBody)
     }
 
     fun logInfo(method: String, message: String) {
-        log(method, "INFO", message, 0)
+        log(method, "INFO", message, 0, null)
     }
 }

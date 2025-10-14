@@ -16,7 +16,6 @@ class WebViewProxyHelper(private val context: Context) {
 
     companion object {
         private const val TAG = "WebViewProxyHelper"
-        private const val API_URL = "https://teuxdeux.com/api/v4/workspaces/444459/todos?since=2025-10-14&until=2025-10-20"
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -77,8 +76,9 @@ class WebViewProxyHelper(private val context: Context) {
 
                             console.log('Step 7: Creating XMLHttpRequest');
                             var xhr = new XMLHttpRequest();
-                            xhr.open('GET', '$API_URL', true);
+                            xhr.open('GET', '${Config.API_URL}', true);
                             xhr.setRequestHeader('Accept', 'application/json');
+                            xhr.setRequestHeader('Authorization', '${Config.AUTH_TOKEN}');
 
                             xhr.onload = function() {
                                 console.log('Step 8: XHR onload, status: ' + xhr.status);
@@ -198,10 +198,11 @@ class WebViewProxyHelper(private val context: Context) {
                 <script>
                     (async function() {
                         try {
-                            const response = await fetch('$API_URL', {
+                            const response = await fetch('${Config.API_URL}', {
                                 method: 'GET',
                                 headers: {
-                                    'Accept': 'application/json'
+                                    'Accept': 'application/json',
+                                    'Authorization': '${Config.AUTH_TOKEN}'
                                 }
                             });
 

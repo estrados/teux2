@@ -12,12 +12,6 @@ class WebViewApiHelper(private val context: Context) {
 
     companion object {
         private const val TAG = "WebViewApiHelper"
-
-        // Test API endpoint - List todos
-        private const val API_URL = "https://teuxdeux.com/api/v4/workspaces/444459/todos?since=2025-10-14&until=2025-10-20"
-
-        // For testing without auth, we'll try to make a simple request
-        // In production, you would first login via WebView and capture the token
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -73,9 +67,10 @@ class WebViewApiHelper(private val context: Context) {
                     }
                 }
 
-                LogHelper.logInfo("WebView", "Step 5: Loading API URL directly: $API_URL")
-                // Just load the API URL - WebView will display the JSON!
-                webView.loadUrl(API_URL)
+                LogHelper.logInfo("WebView", "Step 5: Loading API URL with Authorization header")
+                // Load URL with custom headers
+                val headers = mapOf("Authorization" to Config.AUTH_TOKEN)
+                webView.loadUrl(Config.API_URL, headers)
             } catch (e: Exception) {
                 val responseTime = System.currentTimeMillis() - startTime
                 LogHelper.logError("WebView", "Exception during setup: ${e.message}", responseTime)

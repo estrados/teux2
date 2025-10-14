@@ -10,7 +10,6 @@ class CustomSslHelper {
 
     companion object {
         private const val TAG = "CustomSslHelper"
-        private const val API_URL = "https://teuxdeux.com/api/v4/workspaces/444459/todos?since=2025-10-14&until=2025-10-20"
     }
 
     fun testApi(callback: (success: Boolean, message: String, responseTime: Long) -> Unit) {
@@ -49,14 +48,15 @@ class CustomSslHelper {
             LogHelper.logInfo("CustomSSL", "Step 5: Building HTTP request")
             // Build request
             val request = Request.Builder()
-                .url(API_URL)
+                .url(Config.API_URL)
                 .addHeader("Accept", "application/json")
+                .addHeader("Authorization", Config.AUTH_TOKEN)
                 .addHeader("User-Agent", "KitKat-SSL-Test/1.0")
                 .build()
 
             // Execute request
-            Log.d(TAG, "Making request to: $API_URL")
-            LogHelper.logInfo("CustomSSL", "Step 6: Executing API request to $API_URL")
+            Log.d(TAG, "Making request to: ${Config.API_URL}")
+            LogHelper.logInfo("CustomSSL", "Step 6: Executing API request to ${Config.API_URL}")
 
             client.newCall(request).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: java.io.IOException) {
@@ -121,8 +121,9 @@ class CustomSslHelper {
                 .build()
 
             val request = Request.Builder()
-                .url(API_URL)
+                .url(Config.API_URL)
                 .addHeader("Accept", "application/json")
+                .addHeader("Authorization", Config.AUTH_TOKEN)
                 .build()
 
             client.newCall(request).enqueue(object : Callback {

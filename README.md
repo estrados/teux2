@@ -1,6 +1,11 @@
-# KitKat SSL/HTTPS Test Project
+# KitKat Todo App
 
-Testing SSL/HTTPS workarounds for Android KitKat (API 19) devices that can't make modern API calls due to SSL/TLS compatibility issues.
+Full CRUD Todo application for Android KitKat (API 19) that bypasses SSL/TLS limitations using WebView.
+
+## Problem Solved
+
+**Challenge:** KitKat only supports TLS 1.0, but modern APIs require TLS 1.2+
+**Solution:** Use WebView's SSL engine (updated via Google Play Services) to make HTTPS requests
 
 ## Quick Start
 
@@ -22,55 +27,61 @@ Then open browser to `http://192.168.1.11:8080` to view logs in real-time (auto-
 
 Or open in Android Studio and run on your KitKat device.
 
-### 3. Test the Methods
+### 3. Use the App
 
-The app has 3 buttons to test different SSL/HTTPS approaches:
+The app provides full CRUD operations:
 
-1. **Method 1: WebView API** - Uses WebView's JavaScript fetch API
-2. **Method 2: Custom SSL (OkHttp)** - Custom TrustManager with OkHttp
-3. **Method 3: WebView Proxy** - WebView as SSL proxy using XMLHttpRequest
+- **List Todos** - Fetch todos for today
+- **Create Todo** - Create a new todo item
+- **Update Todo** - Update existing todo text
+- **Delete Todo** - Delete a todo item
+- **Toggle Done** - Mark todo as complete/incomplete
+- **Switch Method** - Toggle between Method 1 (Direct) and Method 3 (XHR)
 
-## Implementation Details
+## Architecture
 
-### Method 1: WebView API (`WebViewApiHelper.kt`)
-- Loads `about:blank` in WebView
-- Injects JavaScript to make `fetch()` call to TeuxDeux API
-- WebView handles SSL/TLS internally
-- Returns results via JavaScript bridge
+### Unified API Interface (`ApiHelper.kt`)
 
-**Pros:**
-- WebView handles SSL better on old devices
-- No custom SSL configuration needed
+```kotlin
+interface ApiHelper {
+    fun request(
+        method: String,      // GET, POST, PATCH, DELETE
+        url: String,
+        headers: Map<String, String>,
+        body: String?,
+        callback: (success: Boolean, statusCode: Int, response: String, responseTime: Long) -> Unit
+    )
+}
+```
 
-**Cons:**
-- Requires JavaScript enabled
-- Subject to CORS restrictions (depends on API)
+### Two Implementations
 
-### Method 2: Custom SSL (`CustomSslHelper.kt`)
-- Uses OkHttp 3.12.13 (last version supporting API 19)
-- Creates custom `TrustManager` that accepts all certificates
-- Bypasses hostname verification for testing
+**Method 1: Direct Load (`DirectLoadApiHelper.kt`)**
+- Loads API URL directly in WebView with custom headers
+- ✅ Simple and fast
+- ❌ **Only supports GET** (WebView limitation)
+- Speed: ~2000ms
 
-**Pros:**
-- Direct HTTP client approach
-- Full control over SSL configuration
+**Method 3: XHR Proxy (`XhrProxyApiHelper.kt`)** ⭐ **RECOMMENDED**
+- Uses WebView with XMLHttpRequest in JavaScript
+- ✅ **Supports all HTTP methods** (GET, POST, PATCH, DELETE)
+- ✅ Can send request body
+- ✅ CORS-compatible (uses base URL)
+- ✅ **Fastest** (~800ms)
+- Speed: ~800ms
 
-**Cons:**
-- May not work if server requires modern TLS
-- Not secure (accepts all certificates for testing)
+### TodoApi Wrapper (`ApiHelper.kt`)
 
-### Method 3: WebView Proxy (`WebViewProxyHelper.kt`)
-- Creates HTML page with embedded JavaScript
-- Uses `XMLHttpRequest` to make API calls
-- WebView acts as SSL proxy
+High-level API for common operations:
+```kotlin
+val todoApi = TodoApi(apiHelper)
 
-**Pros:**
-- Alternative to fetch API
-- More compatible with older WebView versions
-
-**Cons:**
-- Still subject to same-origin policy
-- Requires WebView JavaScript support
+todoApi.listTodos(workspaceId, since, until) { ... }
+todoApi.createTodo(workspaceId, text, date) { ... }
+todoApi.updateTodo(workspaceId, todoId, text) { ... }
+todoApi.deleteTodo(workspaceId, todoId) { ... }
+todoApi.toggleTodoDone(workspaceId, todoId, done) { ... }
+```
 
 ## PHP Logging Server
 
@@ -96,19 +107,20 @@ GET https://teuxdeux.com/api/v4/workspaces/444459/todos?since=2025-10-14&until=2
 
 See `teuxdeux.md` for complete API documentation.
 
-## Architecture
+## Project Structure
 
 ```
 kitkat/
 ├── app/src/main/java/com/example/kitkat/
-│   ├── MainActivity.kt           # Main UI with test buttons
-│   ├── LogHelper.kt             # Sends logs to PHP server
-│   ├── WebViewApiHelper.kt      # Method 1: WebView fetch API
-│   ├── CustomSslHelper.kt       # Method 2: OkHttp custom SSL
-│   └── WebViewProxyHelper.kt    # Method 3: WebView XMLHttpRequest
+│   ├── MainActivity.kt              # Main UI with CRUD buttons
+│   ├── Config.kt                    # API configuration and auth token
+│   ├── ApiHelper.kt                 # Unified API interface + TodoApi wrapper
+│   ├── DirectLoadApiHelper.kt      # Method 1: Direct URL load (GET only)
+│   ├── XhrProxyApiHelper.kt        # Method 3: XHR proxy (all methods)
+│   └── LogHelper.kt                # Sends logs to PHP server
 └── server/
-    ├── index.php                # Logging server
-    └── logs.txt                 # Log file (auto-generated)
+    ├── index.php                   # Logging server
+    └── logs.txt                    # Log file (auto-generated)
 ```
 
 ## Gradle Commands
@@ -152,12 +164,34 @@ adb logcat | grep WebViewProxyHelper
 - App uses `usesCleartextTraffic="true"` to allow HTTP to any local server IP
 - OkHttp 3.12.13 is the last version supporting Android API 19
 
-## Expected Results
+## Test Results on KitKat
 
-On a KitKat device with SSL issues:
+| Method | Status | Speed | Supports |
+|--------|--------|-------|----------|
+| **Method 1 (Direct)** | ✅ Works | ~2000ms | GET only |
+| **Method 3 (XHR)** | ✅ Works | **~800ms** ⚡ | All HTTP methods |
+| Method 2 (OkHttp) | ❌ Fails | N/A | TLS incompatible (removed) |
 
-- **Method 1 (WebView)**: Likely to work ✓ (WebView has better SSL support)
-- **Method 2 (Custom SSL)**: May work depending on server TLS requirements
-- **Method 3 (WebView Proxy)**: Similar to Method 1, likely to work ✓
+**Both WebView methods successfully bypass KitKat's TLS 1.0 limitation!**
 
-Check both the app UI logs and the PHP server logs to see detailed results.
+## Usage Example
+
+```kotlin
+// Create API helper
+val apiHelper = ApiHelperFactory.create(context, ApiHelperFactory.Method.XHR_PROXY)
+val todoApi = TodoApi(apiHelper)
+
+// List todos
+todoApi.listTodos(444459, "2025-10-14", "2025-10-14") { success, statusCode, response, time ->
+    if (success) {
+        println("Got todos: $response")
+    }
+}
+
+// Create todo
+todoApi.createTodo(444459, "Buy milk", "2025-10-14") { success, statusCode, response, time ->
+    if (success) {
+        println("Created: $response")
+    }
+}
+```

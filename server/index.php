@@ -23,6 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $status = $data['status'] ?? 'UNKNOWN';
         $message = $data['message'] ?? '';
         $responseTime = $data['response_time'] ?? 'N/A';
+        $responseBody = $data['response_body'] ?? null;
 
         $logEntry = sprintf(
             "[%s] Method: %s | Status: %s | Time: %sms | Message: %s\n",
@@ -32,6 +33,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $responseTime,
             $message
         );
+
+        // Add response body if present
+        if ($responseBody !== null && $responseBody !== '') {
+            $logEntry .= "Response Body:\n";
+            $logEntry .= $responseBody . "\n";
+            $logEntry .= str_repeat('-', 80) . "\n";
+        }
 
         file_put_contents($logFile, $logEntry, FILE_APPEND);
 
