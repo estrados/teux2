@@ -17,6 +17,7 @@ class MainActivity : AppCompatActivity() {
     // Using XHR Proxy - supports all HTTP operations
     private lateinit var apiHelper: ApiHelper
     private lateinit var todoApi: TodoApi
+    private lateinit var todoHelper: TodoHelper
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -24,6 +25,7 @@ class MainActivity : AppCompatActivity() {
         // Initialize API helper
         apiHelper = ApiHelperFactory.create(this)
         todoApi = TodoApi(apiHelper)
+        todoHelper = TodoHelper(todoApi)
 
         // Main layout
         val mainLayout = LinearLayout(this).apply {
@@ -80,6 +82,16 @@ class MainActivity : AppCompatActivity() {
         })
 
         buttonLayout.addView(Button(this).apply {
+            text = "Move Last Todo to First"
+            setOnClickListener { moveLastToFirst() }
+        })
+
+        buttonLayout.addView(Button(this).apply {
+            text = "Move First Todo to Tomorrow"
+            setOnClickListener { moveFirstToTomorrow() }
+        })
+
+        buttonLayout.addView(Button(this).apply {
             text = "Clear Logs"
             setOnClickListener { logTextView.text = "" }
         })
@@ -123,31 +135,17 @@ class MainActivity : AppCompatActivity() {
         LogHelper.logInfo("APP", "MainActivity started")
     }
 
-    // Store latest todo ID from list (for update/delete/toggle operations)
-    private var latestTodoId: Int? = null
-
     private fun listTodos() {
         appendLog("\n[LIST] Fetching todos...")
-        val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
-        todoApi.listTodos(Config.WORKSPACE_ID, today, today) { success, statusCode, response, responseTime ->
+        todoHelper.listTodosToday(Config.WORKSPACE_ID) { success, statusCode, response, responseTime, firstId, lastId ->
             runOnUiThread {
                 if (success) {
                     appendLog("✓ HTTP $statusCode in ${responseTime}ms")
                     appendLog("Response body:")
                     appendLog(response)
-
-                    // Extract first todo ID for update/delete/toggle
-                    try {
-                        val regex = """"id":(\d+)""".toRegex()
-                        val match = regex.find(response)
-                        latestTodoId = match?.groupValues?.get(1)?.toIntOrNull()
-                        latestTodoId?.let {
-                            appendLog("Saved todo ID $it for operations")
-                        }
-                    } catch (e: Exception) {
-                        appendLog("Could not extract todo ID")
-                    }
+                    firstId?.let { appendLog("Saved first todo ID: $it") }
+                    lastId?.let { appendLog("Saved last todo ID: $it") }
                 } else {
                     appendLog("✗ HTTP $statusCode")
                     appendLog("Error: $response")
@@ -157,11 +155,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createTodo() {
-        val newTodoText = "Test todo created at ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())}"
-        appendLog("\n[CREATE] Creating: $newTodoText")
-        val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        appendLog("\n[CREATE] Creating todo...")
 
-        todoApi.createTodo(Config.WORKSPACE_ID, newTodoText, today) { success, statusCode, response, responseTime ->
+        todoHelper.createTodoNow(Config.WORKSPACE_ID) { success, statusCode, response, responseTime ->
             runOnUiThread {
                 if (success) {
                     appendLog("✓ Created! HTTP $statusCode in ${responseTime}ms")
@@ -176,18 +172,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateTodo() {
-        val todoId = latestTodoId
-        if (todoId == null) {
-            appendLog("\n[UPDATE] Error: No todo ID. Click 'List Todos' first")
-            return
-        }
+        appendLog("\n[UPDATE] Updating todo...")
 
-        val updatedText = "Updated at ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())}"
-        appendLog("\n[UPDATE] Updating todo #$todoId: $updatedText")
-
-        todoApi.updateTodo(Config.WORKSPACE_ID, todoId, updatedText) { success, statusCode, response, responseTime ->
+        todoHelper.updateLatestTodo(Config.WORKSPACE_ID) { success, statusCode, response, responseTime, error ->
             runOnUiThread {
-                if (success) {
+                if (error != null) {
+                    appendLog("\n[UPDATE] Error: $error")
+                } else if (success) {
                     appendLog("✓ Updated! HTTP $statusCode in ${responseTime}ms")
                     appendLog("Response body:")
                     appendLog(response)
@@ -200,21 +191,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun deleteTodo() {
-        val todoId = latestTodoId
-        if (todoId == null) {
-            appendLog("\n[DELETE] Error: No todo ID. Click 'List Todos' first")
-            return
-        }
+        appendLog("\n[DELETE] Deleting todo...")
 
-        appendLog("\n[DELETE] Deleting todo #$todoId")
-
-        todoApi.deleteTodo(Config.WORKSPACE_ID, todoId) { success, statusCode, response, responseTime ->
+        todoHelper.deleteLatestTodo(Config.WORKSPACE_ID) { success, statusCode, response, responseTime, error ->
             runOnUiThread {
-                if (success) {
+                if (error != null) {
+                    appendLog("\n[DELETE] Error: $error")
+                } else if (success) {
                     appendLog("✓ Deleted! HTTP $statusCode in ${responseTime}ms")
                     appendLog("Response body:")
                     appendLog(response)
-                    latestTodoId = null // Clear since it's deleted
                 } else {
                     appendLog("✗ HTTP $statusCode")
                     appendLog("Error: $response")
@@ -224,18 +210,52 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleTodo() {
-        val todoId = latestTodoId
-        if (todoId == null) {
-            appendLog("\n[TOGGLE] Error: No todo ID. Click 'List Todos' first")
-            return
-        }
+        appendLog("\n[TOGGLE] Toggling done status...")
 
-        appendLog("\n[TOGGLE] Toggling done status for todo #$todoId")
-
-        todoApi.toggleTodoDone(Config.WORKSPACE_ID, todoId, true) { success, statusCode, response, responseTime ->
+        todoHelper.toggleLatestTodo(Config.WORKSPACE_ID, true) { success, statusCode, response, responseTime, error ->
             runOnUiThread {
-                if (success) {
+                if (error != null) {
+                    appendLog("\n[TOGGLE] Error: $error")
+                } else if (success) {
                     appendLog("✓ Toggled! HTTP $statusCode in ${responseTime}ms")
+                    appendLog("Response body:")
+                    appendLog(response)
+                } else {
+                    appendLog("✗ HTTP $statusCode")
+                    appendLog("Error: $response")
+                }
+            }
+        }
+    }
+
+    private fun moveLastToFirst() {
+        appendLog("\n[REPOSITION] Moving last todo to first...")
+
+        todoHelper.moveLastToFirst(Config.WORKSPACE_ID) { success, statusCode, response, responseTime, error ->
+            runOnUiThread {
+                if (error != null) {
+                    appendLog("\n[REPOSITION] Error: $error")
+                } else if (success) {
+                    appendLog("✓ Repositioned! HTTP $statusCode in ${responseTime}ms")
+                    appendLog("Response body:")
+                    appendLog(response)
+                } else {
+                    appendLog("✗ HTTP $statusCode")
+                    appendLog("Error: $response")
+                }
+            }
+        }
+    }
+
+    private fun moveFirstToTomorrow() {
+        appendLog("\n[REPOSITION] Moving first todo to tomorrow...")
+
+        todoHelper.moveFirstToTomorrow(Config.WORKSPACE_ID) { success, statusCode, response, responseTime, error ->
+            runOnUiThread {
+                if (error != null) {
+                    appendLog("\n[REPOSITION] Error: $error")
+                } else if (success) {
+                    appendLog("✓ Repositioned! HTTP $statusCode in ${responseTime}ms")
                     appendLog("Response body:")
                     appendLog(response)
                 } else {
