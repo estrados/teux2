@@ -30,6 +30,7 @@ class HomeActivity : AppCompatActivity() {
     private var cachedTodosResponse: String = "" // Cache the full response for date navigation
     private var isSoundEnabled: Boolean = true
     private var isServerLogEnabled: Boolean = true
+    private var isShowDoneTasks: Boolean = true // Show done tasks by default
     private val deletedTodosStack = ArrayDeque<TodoItem>(5) // Keep last 5 deleted todos
 
     data class TodoItem(
@@ -50,6 +51,9 @@ class HomeActivity : AppCompatActivity() {
 
         // Load sound preference (default ON)
         isSoundEnabled = prefs.getBoolean("sound_enabled", true)
+
+        // Load show done tasks preference (default ON)
+        isShowDoneTasks = prefs.getBoolean("show_done_tasks", true)
 
         // Initialize API helpers
         apiHelper = ApiHelperFactory.create(this)
@@ -97,9 +101,11 @@ class HomeActivity : AppCompatActivity() {
         menu.add(0, 3, 2, "Refresh")
         val logTitle = if (isServerLogEnabled) "Server Log: On" else "Server Log: Off"
         menu.add(0, 4, 3, logTitle)
+        val doneTodoTitle = if (isShowDoneTasks) "Hide Done" else "Show Done"
+        menu.add(0, 6, 4, doneTodoTitle)
         // Only show Undo if there are deleted todos
         if (deletedTodosStack.isNotEmpty()) {
-            menu.add(0, 5, 4, "Undo")
+            menu.add(0, 5, 5, "Undo")
         }
         return true
     }
@@ -126,6 +132,10 @@ class HomeActivity : AppCompatActivity() {
             }
             5 -> {
                 undoLastDelete()
+                true
+            }
+            6 -> {
+                toggleShowDoneTasks()
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -155,6 +165,22 @@ class HomeActivity : AppCompatActivity() {
         invalidateOptionsMenu()
         val status = if (isSoundEnabled) "enabled" else "muted"
         LogHelper.logInfo("HOME", "Sound $status")
+    }
+
+    private fun toggleShowDoneTasks() {
+        isShowDoneTasks = !isShowDoneTasks
+        val prefs = getSharedPreferences("TeuxDeuxPrefs", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            putBoolean("show_done_tasks", isShowDoneTasks)
+            apply()
+        }
+        invalidateOptionsMenu()
+        val status = if (isShowDoneTasks) "shown" else "hidden"
+        LogHelper.logInfo("HOME", "Done tasks $status")
+        // Re-parse cached response to update display
+        if (cachedTodosResponse.isNotEmpty()) {
+            parseTodosFromResponse(cachedTodosResponse)
+        }
     }
 
     private fun logout() {
@@ -333,9 +359,11 @@ class HomeActivity : AppCompatActivity() {
                         val done = doneMatch.groupValues[1] == "true"
                         val text = textMatch.groupValues[1]
 
-                        // Only add todos for current date
+                        // Only add todos for current date, and filter done tasks if needed
                         if (date == currentDate) {
-                            todos.add(TodoItem(id, text, done, currentDate))
+                            if (isShowDoneTasks || !done) {
+                                todos.add(TodoItem(id, text, done, currentDate))
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -343,10 +371,10 @@ class HomeActivity : AppCompatActivity() {
                 }
             }
 
-            // Sort: hour-coded (0-24), then non-coded, then done
+            // Sort: undone (hour-coded, then non-coded), then done (hour-coded, then non-coded)
             todos.sortWith(compareBy(
                 { it.done }, // Done items last
-                { if (!it.done) extractHourCode(it.text) ?: 25 else 0 }, // Hour code for undone (25 = no code)
+                { extractHourCode(it.text) ?: 25 }, // Hour code for both done and undone (25 = no code)
                 { it.text } // Alphabetical as tiebreaker
             ))
 
@@ -370,10 +398,10 @@ class HomeActivity : AppCompatActivity() {
                     runOnUiThread {
                         // Update item state
                         todos[index] = todo.copy(done = newDoneState)
-                        // Re-sort: hour-coded, non-coded, then done
+                        // Re-sort: undone (hour-coded, then non-coded), then done (hour-coded, then non-coded)
                         todos.sortWith(compareBy(
                             { it.done },
-                            { if (!it.done) extractHourCode(it.text) ?: 25 else 0 },
+                            { extractHourCode(it.text) ?: 25 },
                             { it.text }
                         ))
                         // Rebuild the ListView
@@ -828,12 +856,46 @@ class HomeActivity : AppCompatActivity() {
             val isCurrentHourTask = isToday && !todo.done && hourCode == currentHour
 
             if (isCurrentHourTask) {
-                // Yellow background and maroon text for current hour task
-                textView.setBackgroundColor(0xFFFFFFCC.toInt()) // Light yellow
+                // Yellow background with state-aware variations for current hour task
+                val stateListDrawable = android.graphics.drawable.StateListDrawable()
+                stateListDrawable.addState(
+                    intArrayOf(android.R.attr.state_focused),
+                    android.graphics.drawable.ColorDrawable(0xFFFFDD88.toInt()) // Darker yellow when focused
+                )
+                stateListDrawable.addState(
+                    intArrayOf(android.R.attr.state_selected),
+                    android.graphics.drawable.ColorDrawable(0xFFFFDD88.toInt()) // Darker yellow when selected
+                )
+                stateListDrawable.addState(
+                    intArrayOf(android.R.attr.state_pressed),
+                    android.graphics.drawable.ColorDrawable(0xFFFFDD88.toInt()) // Darker yellow when pressed
+                )
+                stateListDrawable.addState(
+                    intArrayOf(),
+                    android.graphics.drawable.ColorDrawable(0xFFFFFFCC.toInt()) // Light yellow default
+                )
+                textView.background = stateListDrawable
                 textView.setTextColor(0xFF800000.toInt()) // Maroon
             } else {
-                // Default styling
-                textView.setBackgroundColor(0x00000000.toInt()) // Transparent
+                // Default styling with state-aware variations
+                val stateListDrawable = android.graphics.drawable.StateListDrawable()
+                stateListDrawable.addState(
+                    intArrayOf(android.R.attr.state_focused),
+                    android.graphics.drawable.ColorDrawable(0xFFDDDDDD.toInt()) // Light gray when focused
+                )
+                stateListDrawable.addState(
+                    intArrayOf(android.R.attr.state_selected),
+                    android.graphics.drawable.ColorDrawable(0xFFDDDDDD.toInt()) // Light gray when selected
+                )
+                stateListDrawable.addState(
+                    intArrayOf(android.R.attr.state_pressed),
+                    android.graphics.drawable.ColorDrawable(0xFFDDDDDD.toInt()) // Light gray when pressed
+                )
+                stateListDrawable.addState(
+                    intArrayOf(),
+                    android.graphics.drawable.ColorDrawable(0x00000000.toInt()) // Transparent default
+                )
+                textView.background = stateListDrawable
                 textView.setTextColor(if (todo.done) 0xFF999999.toInt() else 0xFF000000.toInt())
             }
 
