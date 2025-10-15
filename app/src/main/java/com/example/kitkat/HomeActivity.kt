@@ -38,6 +38,7 @@ class HomeActivity : AppCompatActivity() {
     private var isServerLogEnabled: Boolean = true
     private var isShowDoneTasks: Boolean = true // Show done tasks by default
     private var isAnimationEnabled: Boolean = true // Show celebration animations by default
+    private var isSequenceEnabled: Boolean = false // Auto-assign sequential hours to new todos
     private val deletedTodosStack = ArrayDeque<TodoItem>(5) // Keep last 5 deleted todos
     private var lastLongPressTime: Long = 0 // Track last long-press to prevent accidental clicks
 
@@ -65,6 +66,9 @@ class HomeActivity : AppCompatActivity() {
 
         // Load animation preference (default ON)
         isAnimationEnabled = prefs.getBoolean("animation_enabled", true)
+
+        // Load sequence preference (default OFF)
+        isSequenceEnabled = prefs.getBoolean("sequence_enabled", false)
 
         // Initialize API helpers
         apiHelper = ApiHelperFactory.create(this)
@@ -141,9 +145,11 @@ class HomeActivity : AppCompatActivity() {
         menu.add(0, 6, 4, doneTodoTitle)
         val animationTitle = if (isAnimationEnabled) "Animation: On" else "Animation: Off"
         menu.add(0, 7, 5, animationTitle)
+        val sequenceTitle = if (isSequenceEnabled) "Sequence: On" else "Sequence: Off"
+        menu.add(0, 8, 6, sequenceTitle)
         // Only show Undo if there are deleted todos
         if (deletedTodosStack.isNotEmpty()) {
-            menu.add(0, 5, 6, "Undo")
+            menu.add(0, 5, 7, "Undo")
         }
         return true
     }
@@ -179,6 +185,10 @@ class HomeActivity : AppCompatActivity() {
             }
             7 -> {
                 toggleAnimation()
+                true
+            }
+            8 -> {
+                toggleSequence()
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -240,6 +250,19 @@ class HomeActivity : AppCompatActivity() {
         val status = if (isAnimationEnabled) "ON" else "OFF"
         LogHelper.logInfo("HOME", "Celebration animations $status")
         android.widget.Toast.makeText(this, "Animation: $status", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun toggleSequence() {
+        isSequenceEnabled = !isSequenceEnabled
+        val prefs = getSharedPreferences("TeuxDeuxPrefs", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            putBoolean("sequence_enabled", isSequenceEnabled)
+            apply()
+        }
+        invalidateOptionsMenu()
+        val status = if (isSequenceEnabled) "ON" else "OFF"
+        LogHelper.logInfo("HOME", "Sequential hour assignment $status")
+        android.widget.Toast.makeText(this, "Sequence: $status", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun logout() {
@@ -1059,11 +1082,37 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun createNewTodo(text: String) {
-        LogHelper.logInfo("HOME", "Creating new todo: $text")
+        var finalText = text
 
-        todoApi.createTodo(workspaceId, text, currentDate) { success, statusCode, response, responseTime ->
+        // If sequence mode is enabled, auto-assign hour tag
+        if (isSequenceEnabled) {
+            val todayString = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+            // Only auto-assign hours if creating on today's date
+            if (currentDate == todayString) {
+                // Find all undone todos with hour tags
+                val undoneTodosWithHours = todos.filter { !it.done && extractHourCode(it.text) != null }
+
+                val hourToAssign = if (undoneTodosWithHours.isEmpty()) {
+                    // No undone hour-tagged todos → use current hour
+                    Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+                } else {
+                    // Find max hour from undone todos and add 1
+                    val maxHour = undoneTodosWithHours.mapNotNull { extractHourCode(it.text) }.maxOrNull() ?: 0
+                    maxHour + 1
+                }
+
+                // Prepend hour tag to text
+                finalText = "@$hourToAssign $text"
+                LogHelper.logInfo("HOME", "Sequence mode: auto-assigned hour @$hourToAssign")
+            }
+        }
+
+        LogHelper.logInfo("HOME", "Creating new todo: $finalText")
+
+        todoApi.createTodo(workspaceId, finalText, currentDate) { success, statusCode, response, responseTime ->
             if (success) {
-                LogHelper.logSuccess("HOME", "Todo created successfully", responseTime, "Text: $text")
+                LogHelper.logSuccess("HOME", "Todo created successfully", responseTime, "Text: $finalText")
                 runOnUiThread {
                     android.widget.Toast.makeText(this, "Todo added", android.widget.Toast.LENGTH_SHORT).show()
                 }
@@ -1112,6 +1161,7 @@ class HomeActivity : AppCompatActivity() {
             val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
             val hourCode = extractHourCode(todo.text)
             val isCurrentHourTask = isToday && !todo.done && hourCode == currentHour
+            val hasHourCode = !todo.done && hourCode != null
 
             if (isCurrentHourTask) {
                 // Yellow background with state-aware variations for current hour task
@@ -1134,6 +1184,27 @@ class HomeActivity : AppCompatActivity() {
                 )
                 textView.background = stateListDrawable
                 textView.setTextColor(0xFF800000.toInt()) // Maroon
+            } else if (hasHourCode) {
+                // Light green background for assigned hour tasks (not current hour)
+                val stateListDrawable = android.graphics.drawable.StateListDrawable()
+                stateListDrawable.addState(
+                    intArrayOf(android.R.attr.state_focused),
+                    android.graphics.drawable.ColorDrawable(0xFFD0E8D0.toInt()) // Darker green when focused
+                )
+                stateListDrawable.addState(
+                    intArrayOf(android.R.attr.state_selected),
+                    android.graphics.drawable.ColorDrawable(0xFFD0E8D0.toInt()) // Darker green when selected
+                )
+                stateListDrawable.addState(
+                    intArrayOf(android.R.attr.state_pressed),
+                    android.graphics.drawable.ColorDrawable(0xFFD0E8D0.toInt()) // Darker green when pressed
+                )
+                stateListDrawable.addState(
+                    intArrayOf(),
+                    android.graphics.drawable.ColorDrawable(0xFFE8F5E9.toInt()) // Light green default
+                )
+                textView.background = stateListDrawable
+                textView.setTextColor(0xFF333333.toInt()) // Darker gray text
             } else {
                 // Default styling with state-aware variations
                 val stateListDrawable = android.graphics.drawable.StateListDrawable()
