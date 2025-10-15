@@ -39,6 +39,7 @@ class HomeActivity : AppCompatActivity() {
     private var isShowDoneTasks: Boolean = true // Show done tasks by default
     private var isAnimationEnabled: Boolean = true // Show celebration animations by default
     private val deletedTodosStack = ArrayDeque<TodoItem>(5) // Keep last 5 deleted todos
+    private var lastLongPressTime: Long = 0 // Track last long-press to prevent accidental clicks
 
     data class TodoItem(
         val id: Int,
@@ -87,12 +88,17 @@ class HomeActivity : AppCompatActivity() {
 
         // Handle todo item clicks
         listView.setOnItemClickListener { _, _, position, _ ->
-            val todo = todos[position]
-            toggleTodoDone(todo)
+            // Ignore clicks that occur within 300ms after a long-press
+            val timeSinceLongPress = System.currentTimeMillis() - lastLongPressTime
+            if (timeSinceLongPress > 300) {
+                val todo = todos[position]
+                toggleTodoDone(todo)
+            }
         }
 
         // Handle long-press for context actions
         listView.setOnItemLongClickListener { _, _, position, _ ->
+            lastLongPressTime = System.currentTimeMillis()
             val todo = todos[position]
             showTodoItemMenu(todo)
             true
@@ -707,7 +713,7 @@ class HomeActivity : AppCompatActivity() {
         val todayString = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
         val isToday = currentDate == todayString
 
-        val options = mutableListOf("Prioritize", "Edit", "Set to Now")
+        val options = mutableListOf("Prioritize", "Edit", "Set to Now", "Remove Hour")
         if (isToday) {
             options.add("Move to Tomorrow")
         } else {
@@ -722,6 +728,7 @@ class HomeActivity : AppCompatActivity() {
                 "Edit" -> showEditTodoDialog(todo)
                 "Prioritize" -> togglePrioritize(todo)
                 "Set to Now" -> setToNow(todo)
+                "Remove Hour" -> removeHour(todo)
                 "Move to Tomorrow" -> moveTodoToDate(todo, getDateOffsetString(1))
                 "Move to Today" -> moveTodoToDate(todo, todayString)
             }
@@ -806,6 +813,38 @@ class HomeActivity : AppCompatActivity() {
                     runOnUiThread {
                         android.widget.Toast.makeText(this, "Failed to set to now", android.widget.Toast.LENGTH_SHORT).show()
                     }
+                }
+            }
+        }
+    }
+
+    private fun removeHour(todo: TodoItem) {
+        // Remove existing hour tag from text
+        val regex = """@(\d+)\s*""".toRegex()
+        val textWithoutHour = todo.text.replace(regex, "").trim()
+
+        // Check if there was actually an hour tag to remove
+        if (textWithoutHour == todo.text.trim()) {
+            runOnUiThread {
+                android.widget.Toast.makeText(this, "No hour tag to remove", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+
+        LogHelper.logInfo("HOME", "Removing hour tag: '$textWithoutHour'")
+
+        todoApi.updateTodo(workspaceId, todo.id, textWithoutHour) { success, statusCode, response, responseTime ->
+            if (success) {
+                cachedTodosResponse = ""
+                loadTodos()
+                runOnUiThread {
+                    android.widget.Toast.makeText(this, "Hour removed", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                LogHelper.logSuccess("HOME", "Hour tag removed", responseTime, "Text: $textWithoutHour")
+            } else {
+                LogHelper.logError("HOME", "Failed to remove hour", responseTime, response.take(500))
+                runOnUiThread {
+                    android.widget.Toast.makeText(this, "Failed to remove hour", android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
         }
