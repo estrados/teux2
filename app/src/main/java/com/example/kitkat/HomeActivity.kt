@@ -3,12 +3,17 @@ package com.example.kitkat
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.BounceInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.ArrayAdapter
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.ListView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -23,6 +28,7 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var todoApi: TodoApi
     private lateinit var listView: ListView
     private lateinit var adapter: TodoAdapter
+    private lateinit var celebrationView: ImageView
 
     private val todos = mutableListOf<TodoItem>()
     private var workspaceId: Int = 444459 // Default workspace ID
@@ -31,6 +37,7 @@ class HomeActivity : AppCompatActivity() {
     private var isSoundEnabled: Boolean = true
     private var isServerLogEnabled: Boolean = true
     private var isShowDoneTasks: Boolean = true // Show done tasks by default
+    private var isAnimationEnabled: Boolean = true // Show celebration animations by default
     private val deletedTodosStack = ArrayDeque<TodoItem>(5) // Keep last 5 deleted todos
 
     data class TodoItem(
@@ -54,6 +61,9 @@ class HomeActivity : AppCompatActivity() {
 
         // Load show done tasks preference (default ON)
         isShowDoneTasks = prefs.getBoolean("show_done_tasks", true)
+
+        // Load animation preference (default ON)
+        isAnimationEnabled = prefs.getBoolean("animation_enabled", true)
 
         // Initialize API helpers
         apiHelper = ApiHelperFactory.create(this)
@@ -88,7 +98,27 @@ class HomeActivity : AppCompatActivity() {
             true
         }
 
-        setContentView(listView)
+        // Create celebration image view for animations
+        // Get screen width and set image to 50% of screen
+        val displayMetrics = resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val imageSize = (screenWidth * 0.5).toInt()
+
+        celebrationView = ImageView(this).apply {
+            visibility = View.INVISIBLE // Use INVISIBLE instead of GONE so view gets measured/laid out
+            layoutParams = FrameLayout.LayoutParams(imageSize, imageSize, Gravity.CENTER)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setImageResource(R.drawable.star) // Set initial image so it gets measured properly
+            alpha = 0f // Start invisible
+        }
+
+        // Wrap in FrameLayout to overlay celebration on top of list
+        val frameLayout = FrameLayout(this).apply {
+            addView(listView)
+            addView(celebrationView)
+        }
+
+        setContentView(frameLayout)
 
         // Load todos
         loadTodos()
@@ -103,9 +133,11 @@ class HomeActivity : AppCompatActivity() {
         menu.add(0, 4, 3, logTitle)
         val doneTodoTitle = if (isShowDoneTasks) "Hide Done" else "Show Done"
         menu.add(0, 6, 4, doneTodoTitle)
+        val animationTitle = if (isAnimationEnabled) "Animation: On" else "Animation: Off"
+        menu.add(0, 7, 5, animationTitle)
         // Only show Undo if there are deleted todos
         if (deletedTodosStack.isNotEmpty()) {
-            menu.add(0, 5, 5, "Undo")
+            menu.add(0, 5, 6, "Undo")
         }
         return true
     }
@@ -123,6 +155,7 @@ class HomeActivity : AppCompatActivity() {
             3 -> {
                 // Force refresh from API
                 cachedTodosResponse = ""
+                android.widget.Toast.makeText(this, "Refreshing...", android.widget.Toast.LENGTH_SHORT).show()
                 loadTodos()
                 true
             }
@@ -136,6 +169,10 @@ class HomeActivity : AppCompatActivity() {
             }
             6 -> {
                 toggleShowDoneTasks()
+                true
+            }
+            7 -> {
+                toggleAnimation()
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -153,6 +190,7 @@ class HomeActivity : AppCompatActivity() {
         invalidateOptionsMenu()
         val status = if (isServerLogEnabled) "enabled" else "disabled"
         LogHelper.logInfo("HOME", "Server logging $status")
+        android.widget.Toast.makeText(this, "Server log: $status", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun toggleSound() {
@@ -163,8 +201,9 @@ class HomeActivity : AppCompatActivity() {
             apply()
         }
         invalidateOptionsMenu()
-        val status = if (isSoundEnabled) "enabled" else "muted"
+        val status = if (isSoundEnabled) "ON" else "OFF"
         LogHelper.logInfo("HOME", "Sound $status")
+        android.widget.Toast.makeText(this, "Sound: $status", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun toggleShowDoneTasks() {
@@ -175,16 +214,31 @@ class HomeActivity : AppCompatActivity() {
             apply()
         }
         invalidateOptionsMenu()
-        val status = if (isShowDoneTasks) "shown" else "hidden"
+        val status = if (isShowDoneTasks) "SHOWN" else "HIDDEN"
         LogHelper.logInfo("HOME", "Done tasks $status")
+        android.widget.Toast.makeText(this, "Done tasks: $status", android.widget.Toast.LENGTH_SHORT).show()
         // Re-parse cached response to update display
         if (cachedTodosResponse.isNotEmpty()) {
             parseTodosFromResponse(cachedTodosResponse)
         }
     }
 
+    private fun toggleAnimation() {
+        isAnimationEnabled = !isAnimationEnabled
+        val prefs = getSharedPreferences("TeuxDeuxPrefs", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            putBoolean("animation_enabled", isAnimationEnabled)
+            apply()
+        }
+        invalidateOptionsMenu()
+        val status = if (isAnimationEnabled) "ON" else "OFF"
+        LogHelper.logInfo("HOME", "Celebration animations $status")
+        android.widget.Toast.makeText(this, "Animation: $status", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
     private fun logout() {
         LogHelper.logInfo("HOME", "User logging out, clearing tokens")
+        android.widget.Toast.makeText(this, "Logging out...", android.widget.Toast.LENGTH_SHORT).show()
 
         // Clear saved tokens
         val prefs = getSharedPreferences("TeuxDeuxPrefs", Context.MODE_PRIVATE)
@@ -407,10 +461,17 @@ class HomeActivity : AppCompatActivity() {
                         // Rebuild the ListView
                         adapter.notifyDataSetChanged()
 
-                        // Play sound if enabled and marking as done
+                        // Play sound and show animation if marking as done
                         if (newDoneState) {
                             val allDone = todos.isNotEmpty() && todos.all { it.done }
                             playDoneSound(allDone)
+
+                            // Show celebration emoji animation
+                            if (allDone) {
+                                showAllDoneCelebration()
+                            } else {
+                                showCelebration()
+                            }
                         }
                     }
                 }
@@ -453,6 +514,104 @@ class HomeActivity : AppCompatActivity() {
             mp.start()
         } catch (_: Exception) {
             // Ignore if asset not found or playback fails
+        }
+    }
+
+    private fun showCelebration() {
+        if (!isAnimationEnabled) return
+
+        LogHelper.logInfo("ANIMATION", "showCelebration() called - star image")
+        runOnUiThread {
+            try {
+                // Show star/coin image
+                celebrationView.setImageResource(R.drawable.star)
+                celebrationView.bringToFront()
+                celebrationView.visibility = View.VISIBLE
+                celebrationView.alpha = 0f
+                celebrationView.scaleX = 0f
+                celebrationView.scaleY = 0f
+
+                LogHelper.logInfo("ANIMATION", "Starting star animation - view size: ${celebrationView.width}x${celebrationView.height}")
+
+                // Use ViewPropertyAnimator for better KitKat compatibility
+                celebrationView.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(600)
+                    .setInterpolator(BounceInterpolator())
+                    .withEndAction {
+                        LogHelper.logInfo("ANIMATION", "Star bounce complete, holding...")
+                        // Hold for a moment, then fade out
+                        celebrationView.postDelayed({
+                            celebrationView.animate()
+                                .alpha(0f)
+                                .setDuration(400)
+                                .setInterpolator(null)
+                                .withEndAction {
+                                    celebrationView.visibility = View.INVISIBLE
+                                    celebrationView.scaleX = 0f
+                                    celebrationView.scaleY = 0f
+                                    LogHelper.logInfo("ANIMATION", "Star animation ended")
+                                }
+                                .start()
+                        }, 800)
+                    }
+                    .start()
+
+                LogHelper.logInfo("ANIMATION", "Star animation started via ViewPropertyAnimator")
+            } catch (e: Exception) {
+                LogHelper.logError("ANIMATION", "Failed to show celebration: ${e.message}", 0, e.stackTraceToString())
+            }
+        }
+    }
+
+    private fun showAllDoneCelebration() {
+        if (!isAnimationEnabled) return
+
+        LogHelper.logInfo("ANIMATION", "showAllDoneCelebration() called - level up image")
+        runOnUiThread {
+            try {
+                // Show level up image
+                celebrationView.setImageResource(R.drawable.levelup)
+                celebrationView.bringToFront()
+                celebrationView.visibility = View.VISIBLE
+                celebrationView.alpha = 0f
+                celebrationView.scaleX = 0f
+                celebrationView.scaleY = 0f
+
+                LogHelper.logInfo("ANIMATION", "Starting level up animation - view size: ${celebrationView.width}x${celebrationView.height}")
+
+                // Use ViewPropertyAnimator for better KitKat compatibility (larger scale for "level up")
+                celebrationView.animate()
+                    .alpha(1f)
+                    .scaleX(1.2f)
+                    .scaleY(1.2f)
+                    .setDuration(800)
+                    .setInterpolator(OvershootInterpolator())
+                    .withEndAction {
+                        LogHelper.logInfo("ANIMATION", "Level up scale complete, holding...")
+                        // Hold for a moment, then fade out
+                        celebrationView.postDelayed({
+                            celebrationView.animate()
+                                .alpha(0f)
+                                .setDuration(500)
+                                .setInterpolator(null)
+                                .withEndAction {
+                                    celebrationView.visibility = View.INVISIBLE
+                                    celebrationView.scaleX = 0f
+                                    celebrationView.scaleY = 0f
+                                    LogHelper.logInfo("ANIMATION", "Level up animation ended")
+                                }
+                                .start()
+                        }, 1000)
+                    }
+                    .start()
+
+                LogHelper.logInfo("ANIMATION", "Level up animation started via ViewPropertyAnimator")
+            } catch (e: Exception) {
+                LogHelper.logError("ANIMATION", "Failed to show all done celebration: ${e.message}", 0, e.stackTraceToString())
+            }
         }
     }
 
@@ -548,7 +707,7 @@ class HomeActivity : AppCompatActivity() {
         val todayString = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
         val isToday = currentDate == todayString
 
-        val options = mutableListOf("Prioritize", "Edit")
+        val options = mutableListOf("Prioritize", "Edit", "Set to Now")
         if (isToday) {
             options.add("Move to Tomorrow")
         } else {
@@ -562,6 +721,7 @@ class HomeActivity : AppCompatActivity() {
                 "Delete" -> deleteTodo(todo)
                 "Edit" -> showEditTodoDialog(todo)
                 "Prioritize" -> togglePrioritize(todo)
+                "Set to Now" -> setToNow(todo)
                 "Move to Tomorrow" -> moveTodoToDate(todo, getDateOffsetString(1))
                 "Move to Today" -> moveTodoToDate(todo, todayString)
             }
@@ -587,6 +747,65 @@ class HomeActivity : AppCompatActivity() {
                 LogHelper.logError("HOME", "Failed to move todo", responseTime, response.take(500))
                 runOnUiThread {
                     android.widget.Toast.makeText(this, "Failed to move todo", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun setToNow(todo: TodoItem) {
+        val todayString = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+
+        // Remove existing hour tag from text
+        val regex = """@(\d+)\s*""".toRegex()
+        val textWithoutHour = todo.text.replace(regex, "").trim()
+
+        // Add current hour as prefix
+        val newText = "@$currentHour $textWithoutHour"
+
+        LogHelper.logInfo("HOME", "Setting to now: '$newText' (hour: $currentHour)")
+
+        // If not on today's date, move to today first, then update text
+        if (todo.date != todayString) {
+            // Move to today, then update text
+            todoApi.repositionTodo(workspaceId, todo.id, todayString, 0) { success, statusCode, response, responseTime ->
+                if (success) {
+                    // Now update the text with current hour
+                    todoApi.updateTodo(workspaceId, todo.id, newText) { updateSuccess, updateStatusCode, updateResponse, updateResponseTime ->
+                        if (updateSuccess) {
+                            cachedTodosResponse = ""
+                            runOnUiThread {
+                                todos.removeAll { it.id == todo.id }
+                                adapter.notifyDataSetChanged()
+                                android.widget.Toast.makeText(this, "Set to now: @$currentHour", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                            LogHelper.logSuccess("HOME", "Todo set to now", updateResponseTime, "Text: $newText")
+                        } else {
+                            LogHelper.logError("HOME", "Failed to update text after move", updateResponseTime, updateResponse.take(500))
+                        }
+                    }
+                } else {
+                    LogHelper.logError("HOME", "Failed to move to today", responseTime, response.take(500))
+                    runOnUiThread {
+                        android.widget.Toast.makeText(this, "Failed to set to now", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        } else {
+            // Already on today, just update text
+            todoApi.updateTodo(workspaceId, todo.id, newText) { success, statusCode, response, responseTime ->
+                if (success) {
+                    cachedTodosResponse = ""
+                    loadTodos()
+                    runOnUiThread {
+                        android.widget.Toast.makeText(this, "Set to now: @$currentHour", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    LogHelper.logSuccess("HOME", "Todo set to now", responseTime, "Text: $newText")
+                } else {
+                    LogHelper.logError("HOME", "Failed to update todo", responseTime, response.take(500))
+                    runOnUiThread {
+                        android.widget.Toast.makeText(this, "Failed to set to now", android.widget.Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
