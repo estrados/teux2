@@ -147,9 +147,12 @@ class HomeActivity : AppCompatActivity() {
         menu.add(0, 7, 5, animationTitle)
         val sequenceTitle = if (isSequenceEnabled) "Sequence: On" else "Sequence: Off"
         menu.add(0, 8, 6, sequenceTitle)
+        // Shift hour actions moved to action bar
+        menu.add(0, 9, 7, "Shift hour +1 (all undone)")
+        menu.add(0, 10, 8, "Shift hour -1 (all undone)")
         // Only show Undo if there are deleted todos
         if (deletedTodosStack.isNotEmpty()) {
-            menu.add(0, 5, 7, "Undo")
+            menu.add(0, 5, 9, "Undo")
         }
         return true
     }
@@ -177,6 +180,14 @@ class HomeActivity : AppCompatActivity() {
             }
             5 -> {
                 undoLastDelete()
+                true
+            }
+            9 -> {
+                shiftAllUndoneHours(+1)
+                true
+            }
+            10 -> {
+                shiftAllUndoneHours(-1)
                 true
             }
             6 -> {
@@ -752,12 +763,80 @@ class HomeActivity : AppCompatActivity() {
                 "Prioritize" -> togglePrioritize(todo)
                 "Set to Now" -> setToNow(todo)
                 "Remove Hour" -> removeHour(todo)
+                "Shift hour +1 (all undone)" -> shiftAllUndoneHours(+1)
+                "Shift hour -1 (all undone)" -> shiftAllUndoneHours(-1)
                 "Move to Tomorrow" -> moveTodoToDate(todo, getDateOffsetString(1))
                 "Move to Today" -> moveTodoToDate(todo, todayString)
             }
             dialog.dismiss()
         }
         builder.show()
+    }
+
+    // Shift hour tags for all undone todos on current date by the provided delta (+1 or -1)
+    private fun shiftAllUndoneHours(delta: Int) {
+        // Build list of updates first (local), only for undone todos that have hour tags
+        val itemsToUpdate = todos.filter { !it.done }
+            .mapNotNull { item ->
+                val hour = extractHourCode(item.text)
+                if (hour != null) Pair(item, hour) else null
+            }
+
+        if (itemsToUpdate.isEmpty()) {
+            runOnUiThread {
+                android.widget.Toast.makeText(this, "No hour-tagged undone todos", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+
+        // Sequentially process updates to keep network simple and avoid rate bursts
+        fun clampHour(h: Int): Int = when {
+            h < 0 -> 0
+            h > 24 -> 24
+            else -> h
+        }
+
+        var index = 0
+        var successCount = 0
+        var failCount = 0
+
+        fun processNext() {
+            if (index >= itemsToUpdate.size) {
+                // Done; refresh UI
+                cachedTodosResponse = ""
+                loadTodos()
+                val msg = "Shifted: $successCount, Failed: $failCount"
+                runOnUiThread {
+                    android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
+                }
+                return
+            }
+
+            val (item, hour) = itemsToUpdate[index]
+            index++
+
+            val newHour = clampHour(hour + delta)
+            if (newHour == hour) {
+                processNext()
+                return
+            }
+
+            // Remove existing hour tag and rebuild text with new hour at the front
+            val regex = """@(\d+)\s*""".toRegex()
+            val textWithoutHour = item.text.replace(regex, "").trim()
+            val newText = "@${newHour} ${textWithoutHour}".trim()
+
+            todoApi.updateTodo(workspaceId, item.id, newText) { success, statusCode, response, responseTime ->
+                if (success) {
+                    successCount++
+                } else {
+                    failCount++
+                }
+                processNext()
+            }
+        }
+
+        processNext()
     }
 
     private fun moveTodoToDate(todo: TodoItem, targetDate: String) {
