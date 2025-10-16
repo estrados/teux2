@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
 
 object LogHelper {
     private const val TAG = "KitKatSSL"
-    private const val VERSION = "v1.0.8" // App version for debugging
+    private const val VERSION = "v1.0.10" // App version for debugging
 
     // Default server URL
     private const val DEFAULT_SERVER_URL = "http://192.168.1.25:8080"

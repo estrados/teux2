@@ -685,18 +685,73 @@ class HomeActivity : AppCompatActivity() {
         calendar.add(Calendar.DAY_OF_YEAR, 6) // +6 days from H-3 = H+3
         val endDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(calendar.time)
 
-        LogHelper.logInfo("HOME", "Loading todos from $startDate to $endDate")
+        // Step 1: Load from local database immediately (instant feedback)
+        loadTodosFromLocalDatabase(startDate, endDate)
 
+        // Step 2: Show loading emoji in title
+        updateActionBarWithLoading(true)
+
+        // Step 3: Fetch from server in background
+        LogHelper.logInfo("HOME", "Syncing todos from server: $startDate to $endDate")
         todoApi.listTodos(workspaceId, startDate, endDate) { success, statusCode, response, responseTime ->
             if (success) {
                 cachedTodosResponse = response // Cache for date navigation
                 parseTodosFromResponse(response)
-                LogHelper.logSuccess("HOME", "Todos loaded successfully", responseTime, "Count: ${todos.size}")
+                LogHelper.logSuccess("HOME", "Todos synced successfully", responseTime, "Count: ${todos.size}")
             } else {
-                LogHelper.logError("HOME", "Failed to load todos", responseTime, response.take(500))
+                LogHelper.logError("HOME", "Failed to sync todos", responseTime, response.take(500))
                 runOnUiThread {
-                    android.widget.Toast.makeText(this, "Failed to load todos", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(this, "Failed to sync with server", android.widget.Toast.LENGTH_SHORT).show()
                 }
+            }
+
+            // Step 4: Remove loading emoji
+            runOnUiThread {
+                updateActionBarWithLoading(false)
+            }
+        }
+    }
+
+    private fun loadTodosFromLocalDatabase(startDate: String, endDate: String) {
+        // Load cached todos from database for instant display
+        val localTodos = databaseHelper.getTodosInRange(startDate, endDate)
+
+        if (localTodos.isNotEmpty()) {
+            todos.clear()
+            for (localTodo in localTodos) {
+                // Only show todos for current date
+                if (localTodo.date == currentDate) {
+                    if (isShowDoneTasks || !localTodo.done) {
+                        // Use serverId if available, otherwise use localId
+                        val id = localTodo.serverId ?: localTodo.localId.toInt()
+                        todos.add(TodoItem(id, localTodo.text, localTodo.done, localTodo.date))
+                    }
+                }
+            }
+
+            // Sort same as server data
+            todos.sortWith(compareBy(
+                { it.done },
+                { extractHourCode(it.text) ?: 25 },
+                { it.text }
+            ))
+
+            runOnUiThread {
+                adapter.notifyDataSetChanged()
+                LogHelper.logInfo("HOME", "Loaded ${todos.size} todos from local cache")
+            }
+        }
+    }
+
+    private fun updateActionBarWithLoading(isLoading: Boolean) {
+        runOnUiThread {
+            val loadingEmoji = "⏳ " // Hourglass emoji
+            val baseTitle = currentDate
+
+            supportActionBar?.title = if (isLoading) {
+                "$loadingEmoji$baseTitle"
+            } else {
+                baseTitle
             }
         }
     }
