@@ -11,10 +11,10 @@ import java.util.concurrent.TimeUnit
 
 object LogHelper {
     private const val TAG = "KitKatSSL"
+    private const val VERSION = "v1.0.8" // App version for debugging
 
-    // Change this to your server IP (can be any 192.168.1.* address)
-    // Then update server/start.sh with the same IP
-    private const val SERVER_URL = "http://192.168.1.25:8080"
+    // Default server URL
+    private const val DEFAULT_SERVER_URL = "http://192.168.1.25:8080"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -28,12 +28,31 @@ object LogHelper {
     @Volatile
     private var isDebugLoggingEnabled = true
 
+    // Configurable server URL
+    @Volatile
+    private var serverUrl = DEFAULT_SERVER_URL
+
     fun setDebugLoggingEnabled(context: Context, enabled: Boolean) {
         isDebugLoggingEnabled = enabled
         Log.d(TAG, "Debug logging to server: ${if (enabled) "ENABLED" else "DISABLED"}")
     }
 
+    fun setServerUrl(context: Context, url: String) {
+        serverUrl = url
+        // Save to preferences
+        val prefs = context.getSharedPreferences("TeuxDeuxPrefs", Context.MODE_PRIVATE)
+        prefs.edit().putString("server_log_url", url).apply()
+        Log.d(TAG, "Server URL updated to: $url")
+    }
+
+    fun getServerUrl(context: Context): String {
+        val prefs = context.getSharedPreferences("TeuxDeuxPrefs", Context.MODE_PRIVATE)
+        serverUrl = prefs.getString("server_log_url", DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
+        return serverUrl
+    }
+
     data class LogData(
+        val version: String,
         val method: String,
         val status: String,
         val message: String,
@@ -42,8 +61,11 @@ object LogHelper {
     )
 
     fun log(method: String, status: String, message: String, responseTime: Long = 0, responseBody: String? = null) {
+        // Add version prefix to message
+        val messageWithVersion = "[$VERSION] $message"
+
         // Always log to Logcat
-        Log.d(TAG, "[$method] $status - $message (${responseTime}ms)")
+        Log.d(TAG, "[$method] $status - $messageWithVersion (${responseTime}ms)")
 
         // Only send to server if debug logging is enabled
         if (!isDebugLoggingEnabled) {
@@ -53,7 +75,7 @@ object LogHelper {
         // Send to PHP server asynchronously
         Thread {
             try {
-                val logData = LogData(method, status, message, responseTime, responseBody)
+                val logData = LogData(VERSION, method, status, messageWithVersion, responseTime, responseBody)
                 val json = gson.toJson(logData)
 
                 val body = RequestBody.create(
@@ -62,7 +84,7 @@ object LogHelper {
                 )
 
                 val request = Request.Builder()
-                    .url(SERVER_URL)
+                    .url(serverUrl)
                     .post(body)
                     .build()
 

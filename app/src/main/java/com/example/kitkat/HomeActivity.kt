@@ -29,6 +29,9 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var listView: ListView
     private lateinit var adapter: TodoAdapter
     private lateinit var celebrationView: ImageView
+    private lateinit var networkMonitor: NetworkMonitor
+    private lateinit var databaseHelper: DatabaseHelper
+    private lateinit var offlineManager: OfflineManager
 
     private val todos = mutableListOf<TodoItem>()
     private var workspaceId: Int = 444459 // Default workspace ID
@@ -41,6 +44,7 @@ class HomeActivity : AppCompatActivity() {
     private var isSequenceEnabled: Boolean = false // Auto-assign sequential hours to new todos
     private val deletedTodosStack = ArrayDeque<TodoItem>(5) // Keep last 5 deleted todos
     private var lastLongPressTime: Long = 0 // Track last long-press to prevent accidental clicks
+    private var isOnline: Boolean = true // Track online/offline state
 
     data class TodoItem(
         val id: Int,
@@ -56,6 +60,7 @@ class HomeActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("TeuxDeuxPrefs", Context.MODE_PRIVATE)
         val debugLoggingEnabled = prefs.getBoolean("debug_logging", true)
         LogHelper.setDebugLoggingEnabled(this, debugLoggingEnabled)
+        LogHelper.getServerUrl(this) // Load saved server URL
         isServerLogEnabled = debugLoggingEnabled
 
         // Load sound preference (default ON)
@@ -70,17 +75,49 @@ class HomeActivity : AppCompatActivity() {
         // Load sequence preference (default OFF)
         isSequenceEnabled = prefs.getBoolean("sequence_enabled", false)
 
-        // Initialize API helpers
+        // Initialize offline components
+        databaseHelper = DatabaseHelper(this)
+        networkMonitor = NetworkMonitor(this)
         apiHelper = ApiHelperFactory.create(this)
-        todoApi = TodoApi(apiHelper)
+        offlineManager = OfflineManager(this, apiHelper, networkMonitor, databaseHelper)
+        todoApi = TodoApi(apiHelper, databaseHelper, offlineManager)
+
+        // Start monitoring network
+        networkMonitor.startMonitoring()
+        isOnline = networkMonitor.isOnline()
+
+        // Listen for network state changes
+        networkMonitor.addListener { online ->
+            isOnline = online
+            runOnUiThread {
+                updateActionBarForNetworkState()
+                if (online) {
+                    android.widget.Toast.makeText(this, "Back online - syncing...", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    android.widget.Toast.makeText(this, "Offline mode", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        // Listen for sync completion
+        offlineManager.addSyncListener { success, error ->
+            runOnUiThread {
+                if (success) {
+                    android.widget.Toast.makeText(this, "Sync completed", android.widget.Toast.LENGTH_SHORT).show()
+                    loadTodos() // Refresh after sync
+                } else {
+                    android.widget.Toast.makeText(this, "Sync failed: $error", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
 
         // Setup ActionBar with date
         supportActionBar?.apply {
             title = formatDateForDisplay(currentDate)
         }
 
-        // Update ActionBar color depending on date
-        updateActionBarColorForCurrentDate()
+        // Update ActionBar color depending on date and network state
+        updateActionBarForNetworkState()
 
         // Setup ListView
         listView = ListView(this).apply {
@@ -147,12 +184,23 @@ class HomeActivity : AppCompatActivity() {
         menu.add(0, 7, 5, animationTitle)
         val sequenceTitle = if (isSequenceEnabled) "Sequence: On" else "Sequence: Off"
         menu.add(0, 8, 6, sequenceTitle)
+        val prefs = getSharedPreferences("kitkat_prefs", MODE_PRIVATE)
+        val isKeyboardLoggingEnabled = prefs.getBoolean("keyboard_logging", true)
+        val keyboardLogTitle = if (isKeyboardLoggingEnabled) "Keyboard Log: On" else "Keyboard Log: Off"
+        menu.add(0, 13, 7, keyboardLogTitle)
         // Shift hour actions moved to action bar
-        menu.add(0, 9, 7, "Shift hour +1 (all undone)")
-        menu.add(0, 10, 8, "Shift hour -1 (all undone)")
+        menu.add(0, 9, 8, "Shift hour +1 (all undone)")
+        menu.add(0, 10, 9, "Shift hour -1 (all undone)")
+        // Reset & Resync option
+        menu.add(0, 12, 10, "Reset & Resync")
+        // Show sync status if offline and has pending operations
+        val pendingCount = offlineManager.getPendingOperationCount()
+        if (pendingCount > 0) {
+            menu.add(0, 11, 10, "Sync Now ($pendingCount pending)")
+        }
         // Only show Undo if there are deleted todos
         if (deletedTodosStack.isNotEmpty()) {
-            menu.add(0, 5, 9, "Undo")
+            menu.add(0, 5, 11, "Undo")
         }
         return true
     }
@@ -202,22 +250,193 @@ class HomeActivity : AppCompatActivity() {
                 toggleSequence()
                 true
             }
+            11 -> {
+                // Manual sync
+                android.widget.Toast.makeText(this, "Starting sync...", android.widget.Toast.LENGTH_SHORT).show()
+                offlineManager.syncPendingOperations()
+                true
+            }
+            12 -> {
+                // Reset & Resync
+                resetAndResync()
+                true
+            }
+            13 -> {
+                toggleKeyboardLogging()
+                true
+            }
             else -> super.onOptionsItemSelected(item)
         }
     }
 
-    private fun toggleServerLog() {
-        isServerLogEnabled = !isServerLogEnabled
-        val prefs = getSharedPreferences("TeuxDeuxPrefs", Context.MODE_PRIVATE)
-        prefs.edit().apply {
-            putBoolean("debug_logging", isServerLogEnabled)
-            apply()
+    override fun onDestroy() {
+        super.onDestroy()
+        // Stop network monitoring
+        networkMonitor.stopMonitoring()
+    }
+
+    private fun resetAndResync() {
+        val builder = android.app.AlertDialog.Builder(this)
+        builder.setTitle("Reset & Resync")
+        builder.setMessage("This will clear all local data and reload from server. Continue?")
+        builder.setPositiveButton("Reset") { dialog, _ ->
+            LogHelper.logInfo("HOME", "User requested Reset & Resync")
+
+            // Clear local database
+            databaseHelper.clearAllTodos()
+            databaseHelper.clearAllOperations()
+
+            // Clear cached response
+            cachedTodosResponse = ""
+
+            // Clear todos list
+            todos.clear()
+            adapter.notifyDataSetChanged()
+
+            // Refresh menu to remove "Sync Now" item
+            invalidateOptionsMenu()
+
+            // Show loading message
+            android.widget.Toast.makeText(this, "Loading from server...", android.widget.Toast.LENGTH_SHORT).show()
+
+            // Reload todos from server
+            loadTodos()
+
+            LogHelper.logInfo("HOME", "Reset complete - reloading from server")
+            dialog.dismiss()
         }
-        LogHelper.setDebugLoggingEnabled(this, isServerLogEnabled)
-        invalidateOptionsMenu()
-        val status = if (isServerLogEnabled) "enabled" else "disabled"
-        LogHelper.logInfo("HOME", "Server logging $status")
-        android.widget.Toast.makeText(this, "Server log: $status", android.widget.Toast.LENGTH_SHORT).show()
+        builder.setNegativeButton("Cancel") { dialog, _ ->
+            dialog.dismiss()
+        }
+        builder.show()
+    }
+
+    private fun toggleServerLog() {
+        // If turning ON, show dialog to configure server host
+        if (!isServerLogEnabled) {
+            showServerHostDialog()
+        } else {
+            // Turning OFF
+            isServerLogEnabled = false
+            val prefs = getSharedPreferences("TeuxDeuxPrefs", Context.MODE_PRIVATE)
+            prefs.edit().putBoolean("debug_logging", false).apply()
+            LogHelper.setDebugLoggingEnabled(this, false)
+            invalidateOptionsMenu()
+            android.widget.Toast.makeText(this, "Server log: disabled", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun showServerHostDialog() {
+        val dialog = android.app.Dialog(this)
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        dialog.setCanceledOnTouchOutside(true)
+
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(32, 24, 32, 24)
+            setBackgroundColor(0xFFFFFFFF.toInt())
+        }
+
+        // Title
+        val title = android.widget.TextView(this).apply {
+            text = "Server Log Configuration"
+            textSize = 18f
+            setPadding(0, 0, 0, 16)
+            setTextColor(0xFF000000.toInt())
+        }
+        container.addView(title)
+
+        // Description
+        val description = android.widget.TextView(this).apply {
+            text = "Enter server URL for logging (e.g., http://192.168.1.25:8080)"
+            textSize = 12f
+            setPadding(0, 0, 0, 16)
+            setTextColor(0xFF666666.toInt())
+        }
+        container.addView(description)
+
+        // Input field
+        val input = android.widget.EditText(this).apply {
+            hint = "http://192.168.1.25:8080"
+            inputType = android.text.InputType.TYPE_TEXT_VARIATION_URI
+            isSingleLine = true
+            setText(LogHelper.getServerUrl(this@HomeActivity))
+            setSelection(text.length)
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        // Button container
+        val buttonContainer = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            setPadding(0, 16, 0, 0)
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        // Cancel button
+        val cancelButton = android.widget.Button(this).apply {
+            text = "Cancel"
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                0,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+            setOnClickListener {
+                dialog.dismiss()
+            }
+        }
+
+        // Save button
+        val saveButton = android.widget.Button(this).apply {
+            text = "Enable"
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                0,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+            setOnClickListener {
+                val url = input.text.toString().trim()
+                if (url.isNotEmpty()) {
+                    LogHelper.setServerUrl(this@HomeActivity, url)
+
+                    // Enable server logging
+                    isServerLogEnabled = true
+                    val prefs = getSharedPreferences("TeuxDeuxPrefs", Context.MODE_PRIVATE)
+                    prefs.edit().putBoolean("debug_logging", true).apply()
+                    LogHelper.setDebugLoggingEnabled(this@HomeActivity, true)
+                    invalidateOptionsMenu()
+
+                    LogHelper.logInfo("HOME", "Server logging enabled with URL: $url")
+                    android.widget.Toast.makeText(this@HomeActivity, "Server log enabled", android.widget.Toast.LENGTH_SHORT).show()
+                    dialog.dismiss()
+                } else {
+                    android.widget.Toast.makeText(this@HomeActivity, "Please enter a valid URL", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        buttonContainer.addView(cancelButton)
+        buttonContainer.addView(saveButton)
+
+        container.addView(input)
+        container.addView(buttonContainer)
+        dialog.setContentView(container)
+
+        dialog.window?.apply {
+            setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            setGravity(android.view.Gravity.CENTER)
+        }
+
+        dialog.show()
+        input.requestFocus()
+        val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        imm.showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
     }
 
     private fun toggleSound() {
@@ -231,6 +450,20 @@ class HomeActivity : AppCompatActivity() {
         val status = if (isSoundEnabled) "ON" else "OFF"
         LogHelper.logInfo("HOME", "Sound $status")
         android.widget.Toast.makeText(this, "Sound: $status", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun toggleKeyboardLogging() {
+        val prefs = getSharedPreferences("kitkat_prefs", MODE_PRIVATE)
+        val currentValue = prefs.getBoolean("keyboard_logging", true)
+        val newValue = !currentValue
+        prefs.edit().apply {
+            putBoolean("keyboard_logging", newValue)
+            apply()
+        }
+        invalidateOptionsMenu()
+        val status = if (newValue) "ON" else "OFF"
+        LogHelper.logInfo("HOME", "Keyboard logging $status")
+        android.widget.Toast.makeText(this, "Keyboard Log: $status", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun toggleShowDoneTasks() {
@@ -305,18 +538,23 @@ class HomeActivity : AppCompatActivity() {
             return true // Consume both DOWN and UP events
         }
 
-        // Log all key events to server
+        // Log all key events to server (if enabled)
         if (event.action == KeyEvent.ACTION_DOWN) {
-            val keyInfo = buildString {
-                append("Key: ${KeyEvent.keyCodeToString(event.keyCode)} (${event.keyCode})")
-                append(", Char: '${event.unicodeChar.toChar()}'")
-                append(", Unicode: ${event.unicodeChar}")
-                append(", Meta: ${event.metaState}")
-                append(", Device: ${event.deviceId}")
-                append(", Source: ${event.source}")
-                append(", Repeat: ${event.repeatCount}")
+            val prefs = getSharedPreferences("kitkat_prefs", MODE_PRIVATE)
+            val isKeyboardLoggingEnabled = prefs.getBoolean("keyboard_logging", true)
+
+            if (isKeyboardLoggingEnabled) {
+                val keyInfo = buildString {
+                    append("Key: ${KeyEvent.keyCodeToString(event.keyCode)} (${event.keyCode})")
+                    append(", Char: '${event.unicodeChar.toChar()}'")
+                    append(", Unicode: ${event.unicodeChar}")
+                    append(", Meta: ${event.metaState}")
+                    append(", Device: ${event.deviceId}")
+                    append(", Source: ${event.source}")
+                    append(", Repeat: ${event.repeatCount}")
+                }
+                LogHelper.logInfo("KEYBOARD", keyInfo)
             }
-            LogHelper.logInfo("KEYBOARD", keyInfo)
 
             // Handle date navigation with arrow keys
             when (event.keyCode) {
@@ -360,8 +598,8 @@ class HomeActivity : AppCompatActivity() {
             // Update ActionBar title
             supportActionBar?.title = formatDateForDisplay(currentDate)
 
-            // Update ActionBar color depending on date
-            updateActionBarColorForCurrentDate()
+            // Update ActionBar color depending on date and network state
+            updateActionBarForNetworkState()
 
             LogHelper.logInfo("HOME", "Date changed to $currentDate")
 
@@ -382,6 +620,38 @@ class HomeActivity : AppCompatActivity() {
         val isToday = currentDate == todayString
         val color = if (isToday) 0xFF800000.toInt() else getThemePrimaryColor()
         supportActionBar?.setBackgroundDrawable(ColorDrawable(color))
+    }
+
+    private fun updateActionBarForNetworkState() {
+        val todayString = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val isToday = currentDate == todayString
+
+        val color = if (!isOnline) {
+            // Black for offline mode
+            0xFF000000.toInt()
+        } else if (isToday) {
+            // Maroon for today when online
+            0xFF800000.toInt()
+        } else {
+            // Default theme color for other dates
+            getThemePrimaryColor()
+        }
+
+        supportActionBar?.setBackgroundDrawable(ColorDrawable(color))
+
+        // Update title to show offline indicator
+        val dateTitle = formatDateForDisplay(currentDate)
+        val titleWithStatus = if (!isOnline) {
+            val pendingCount = offlineManager.getPendingOperationCount()
+            if (pendingCount > 0) {
+                "$dateTitle • Offline ($pendingCount)"
+            } else {
+                "$dateTitle • Offline"
+            }
+        } else {
+            dateTitle
+        }
+        supportActionBar?.title = titleWithStatus
     }
 
     private fun getThemePrimaryColor(): Int {
@@ -842,15 +1112,9 @@ class HomeActivity : AppCompatActivity() {
     private fun moveTodoToDate(todo: TodoItem, targetDate: String) {
         todoApi.repositionTodo(workspaceId, todo.id, targetDate, 0) { success, statusCode, response, responseTime ->
             if (success) {
-                // Clear cache to force refresh when navigating to destination date
+                // Clear cache and reload to ensure database changes are reflected
                 cachedTodosResponse = ""
-                runOnUiThread {
-                    // Remove from current list since it moved to another date
-                    val removed = todos.removeAll { it.id == todo.id }
-                    if (removed) {
-                        adapter.notifyDataSetChanged()
-                    }
-                }
+                loadTodos() // Reload from database (offline) or server (online)
                 LogHelper.logSuccess("HOME", "Todo moved to $targetDate", responseTime, "ID: ${todo.id}")
             } else {
                 LogHelper.logError("HOME", "Failed to move todo", responseTime, response.take(500))
