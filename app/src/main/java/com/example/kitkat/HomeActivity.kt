@@ -45,6 +45,7 @@ class HomeActivity : AppCompatActivity() {
     private val deletedTodosStack = ArrayDeque<TodoItem>(5) // Keep last 5 deleted todos
     private var lastLongPressTime: Long = 0 // Track last long-press to prevent accidental clicks
     private var isOnline: Boolean = true // Track online/offline state
+    private val addTodoExtraKeyCodes = setOf(301) // Additional key codes that should open Add Todo
 
     data class TodoItem(
         val id: Int,
@@ -538,6 +539,14 @@ class HomeActivity : AppCompatActivity() {
             return true // Consume both DOWN and UP events
         }
 
+        // Also allow additional hardware key(s) (from logs, e.g., code 301) to open Add Todo
+        if (event.keyCode in addTodoExtraKeyCodes) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                showAddTodoDialog()
+            }
+            return true
+        }
+
         // Log all key events to server (if enabled)
         if (event.action == KeyEvent.ACTION_DOWN) {
             // Ignore key-repeat to prevent double navigation on long/held presses
@@ -766,7 +775,7 @@ class HomeActivity : AppCompatActivity() {
 
     private fun updateActionBarWithLoading(isLoading: Boolean) {
         runOnUiThread {
-            val loadingEmoji = "⏳ " // Hourglass emoji
+            val loadingEmoji = if (apiHelper is XhrProxyApiHelper) "⏳ " else "🔄 "
             val baseTitle = formatDateForDisplay(currentDate)
 
             supportActionBar?.title = if (isLoading) {

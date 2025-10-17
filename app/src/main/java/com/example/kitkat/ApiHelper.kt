@@ -21,7 +21,12 @@ interface ApiHelper {
  */
 object ApiHelperFactory {
     fun create(context: Context): ApiHelper {
-        return XhrProxyApiHelper(context)
+        // Use WebView XHR proxy on KitKat (API 19) where TLS is problematic; otherwise use OkHttp
+        return if (android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.KITKAT) {
+            XhrProxyApiHelper(context)
+        } else {
+            OkHttpApiHelper(context)
+        }
     }
 }
 
