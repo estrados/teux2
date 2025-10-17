@@ -540,6 +540,10 @@ class HomeActivity : AppCompatActivity() {
 
         // Log all key events to server (if enabled)
         if (event.action == KeyEvent.ACTION_DOWN) {
+            // Ignore key-repeat to prevent double navigation on long/held presses
+            if (event.repeatCount > 0) {
+                return true
+            }
             val prefs = getSharedPreferences("kitkat_prefs", MODE_PRIVATE)
             val isKeyboardLoggingEnabled = prefs.getBoolean("keyboard_logging", true)
 
@@ -618,7 +622,7 @@ class HomeActivity : AppCompatActivity() {
     private fun updateActionBarColorForCurrentDate() {
         val todayString = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
         val isToday = currentDate == todayString
-        val color = if (isToday) 0xFF800000.toInt() else getThemePrimaryColor()
+        val color = if (isToday) 0xFF800000.toInt() else 0xFF333333.toInt()
         supportActionBar?.setBackgroundDrawable(ColorDrawable(color))
     }
 
@@ -633,8 +637,8 @@ class HomeActivity : AppCompatActivity() {
             // Maroon for today when online
             0xFF800000.toInt()
         } else {
-            // Default theme color for other dates
-            getThemePrimaryColor()
+            // Dark grey for other dates when online
+            0xFF333333.toInt()
         }
 
         supportActionBar?.setBackgroundDrawable(ColorDrawable(color))
@@ -663,9 +667,26 @@ class HomeActivity : AppCompatActivity() {
 
     private fun formatDateForDisplay(dateString: String): String {
         val inputFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        val outputFormat = SimpleDateFormat("EEEE, MMMM d", Locale.US)
         val date = inputFormat.parse(dateString) ?: Date()
-        return outputFormat.format(date)
+
+        val calendar = Calendar.getInstance()
+        calendar.time = date
+        val dayOfMonth = calendar.get(Calendar.DAY_OF_MONTH)
+        val suffix = getDayOrdinalSuffix(dayOfMonth)
+
+        val dayShort = SimpleDateFormat("EEE", Locale.US).format(date)
+        val monthShort = SimpleDateFormat("MMM", Locale.US).format(date)
+        return "$dayShort ${dayOfMonth}${suffix} $monthShort"
+    }
+
+    private fun getDayOrdinalSuffix(day: Int): String {
+        if (day in 11..13) return "th"
+        return when (day % 10) {
+            1 -> "st"
+            2 -> "nd"
+            3 -> "rd"
+            else -> "th"
+        }
     }
 
     private fun extractHourCode(text: String): Int? {
@@ -746,7 +767,7 @@ class HomeActivity : AppCompatActivity() {
     private fun updateActionBarWithLoading(isLoading: Boolean) {
         runOnUiThread {
             val loadingEmoji = "⏳ " // Hourglass emoji
-            val baseTitle = currentDate
+            val baseTitle = formatDateForDisplay(currentDate)
 
             supportActionBar?.title = if (isLoading) {
                 "$loadingEmoji$baseTitle"
