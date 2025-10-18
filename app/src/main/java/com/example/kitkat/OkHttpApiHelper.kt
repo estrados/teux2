@@ -67,6 +67,8 @@ class OkHttpApiHelper(@Suppress("unused") private val context: Context) : ApiHel
     ) {
         val startTime = System.currentTimeMillis()
 
+        LogHelper.logInfo("OkHttp", "$method $url")
+
         val builder = Request.Builder().url(url)
         for ((key, value) in headers) {
             builder.addHeader(key, value)
@@ -93,12 +95,18 @@ class OkHttpApiHelper(@Suppress("unused") private val context: Context) : ApiHel
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 val elapsed = System.currentTimeMillis() - startTime
+                LogHelper.logError("OkHttp", "Request failed: ${e.message}", elapsed)
                 callback(false, 0, e.message ?: "Request failed", elapsed)
             }
 
             override fun onResponse(call: Call, response: Response) {
                 val elapsed = System.currentTimeMillis() - startTime
                 val responseBody = response.body()?.string() ?: ""
+                if (response.isSuccessful) {
+                    LogHelper.logSuccess("OkHttp", "HTTP ${response.code()}, ${responseBody.length} chars", elapsed, responseBody)
+                } else {
+                    LogHelper.logError("OkHttp", "HTTP ${response.code()}: ${responseBody.take(100)}", elapsed, responseBody)
+                }
                 callback(response.isSuccessful, response.code(), responseBody, elapsed)
                 response.close()
             }

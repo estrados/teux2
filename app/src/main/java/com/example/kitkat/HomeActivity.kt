@@ -43,9 +43,8 @@ class HomeActivity : AppCompatActivity() {
     private var isAnimationEnabled: Boolean = true // Show celebration animations by default
     private var isSequenceEnabled: Boolean = false // Auto-assign sequential hours to new todos
     private val deletedTodosStack = ArrayDeque<TodoItem>(5) // Keep last 5 deleted todos
-    private var lastLongPressTime: Long = 0 // Track last long-press to prevent accidental clicks
+    private var lastActionTime: Long = 0 // Simple cooldown for all actions
     private var isOnline: Boolean = true // Track online/offline state
-    private val addTodoExtraKeyCodes = setOf(301) // Additional key codes that should open Add Todo
 
     data class TodoItem(
         val id: Int,
@@ -128,19 +127,24 @@ class HomeActivity : AppCompatActivity() {
         adapter = TodoAdapter(this, todos, currentDate)
         listView.adapter = adapter
 
-        // Handle todo item clicks
+        // Handle todo item clicks (touch only, keyboard handled in dispatchKeyEvent)
         listView.setOnItemClickListener { _, _, position, _ ->
-            // Ignore clicks that occur within 300ms after a long-press
-            val timeSinceLongPress = System.currentTimeMillis() - lastLongPressTime
-            if (timeSinceLongPress > 300) {
-                val todo = todos[position]
-                toggleTodoDone(todo)
-            }
+            val currentTime = System.currentTimeMillis()
+            // Simple cooldown - prevent rapid-fire actions
+            if (currentTime - lastActionTime < 300) return@setOnItemClickListener
+            lastActionTime = currentTime
+
+            val todo = todos[position]
+            toggleTodoDone(todo)
         }
 
         // Handle long-press for context actions
         listView.setOnItemLongClickListener { _, _, position, _ ->
-            lastLongPressTime = System.currentTimeMillis()
+            val currentTime = System.currentTimeMillis()
+            //  Simple cooldown - prevent rapid-fire actions
+            if (currentTime - lastActionTime < 300) return@setOnItemLongClickListener true
+            lastActionTime = currentTime
+
             val todo = todos[position]
             showTodoItemMenu(todo)
             true
@@ -531,42 +535,74 @@ class HomeActivity : AppCompatActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         // Consume MENU key completely to prevent opening options menu
-        if (event.keyCode == KeyEvent.KEYCODE_MENU) {
+        if (event.keyCode == KeyEvent.KEYCODE_MENU || event.keyCode == 301) {
             if (event.action == KeyEvent.ACTION_DOWN) {
-                LogHelper.logInfo("KEYBOARD", "Key: KEYCODE_MENU (82)")
+                LogHelper.logInfo("KEYBOARD", "Key: ${KeyEvent.keyCodeToString(event.keyCode)} (${event.keyCode})")
                 showAddTodoDialog()
             }
             return true // Consume both DOWN and UP events
         }
 
-        // Also allow additional hardware key(s) (from logs, e.g., code 301) to open Add Todo
-        if (event.keyCode in addTodoExtraKeyCodes) {
-            if (event.action == KeyEvent.ACTION_DOWN) {
-                showAddTodoDialog()
-            }
-            return true
-        }
+        // Handle Enter key - just toggle done
+        if (event.keyCode == KeyEvent.KEYCODE_ENTER || event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                val currentTime = System.currentTimeMillis()
+                // Simple cooldown - prevent rapid-fire actions
+                if (currentTime - lastActionTime < 300) return true
+                lastActionTime = currentTime
 
-        // Log all key events to server (if enabled)
-        if (event.action == KeyEvent.ACTION_DOWN) {
-            // Ignore key-repeat to prevent double navigation on long/held presses
-            if (event.repeatCount > 0) {
+                val position = listView.selectedItemPosition
+                if (position >= 0 && position < todos.size) {
+                    val todo = todos[position]
+                    toggleTodoDone(todo)
+                }
                 return true
             }
-            val prefs = getSharedPreferences("kitkat_prefs", MODE_PRIVATE)
-            val isKeyboardLoggingEnabled = prefs.getBoolean("keyboard_logging", true)
+            return true // Consume DOWN and other actions
+        }
 
-            if (isKeyboardLoggingEnabled) {
-                val keyInfo = buildString {
-                    append("Key: ${KeyEvent.keyCodeToString(event.keyCode)} (${event.keyCode})")
-                    append(", Char: '${event.unicodeChar.toChar()}'")
-                    append(", Unicode: ${event.unicodeChar}")
-                    append(", Meta: ${event.metaState}")
-                    append(", Device: ${event.deviceId}")
-                    append(", Source: ${event.source}")
-                    append(", Repeat: ${event.repeatCount}")
+        // Handle DEL key - show context menu
+        if (event.keyCode == KeyEvent.KEYCODE_DEL) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                val currentTime = System.currentTimeMillis()
+                // Simple cooldown - prevent rapid-fire actions
+                if (currentTime - lastActionTime < 300) return true
+                lastActionTime = currentTime
+
+                val position = listView.selectedItemPosition
+                if (position >= 0 && position < todos.size) {
+                    val todo = todos[position]
+                    showTodoItemMenu(todo)
                 }
-                LogHelper.logInfo("KEYBOARD", keyInfo)
+                return true
+            }
+            return true // Consume DOWN too
+        }
+
+        // Log all key events to server (if enabled) - both DOWN and UP
+        val prefs = getSharedPreferences("kitkat_prefs", MODE_PRIVATE)
+        val isKeyboardLoggingEnabled = prefs.getBoolean("keyboard_logging", true)
+
+        if (isKeyboardLoggingEnabled) {
+            val actionName = when (event.action) {
+                KeyEvent.ACTION_DOWN -> "DOWN"
+                KeyEvent.ACTION_UP -> "UP"
+                else -> "ACTION_${event.action}"
+            }
+            val keyInfo = buildString {
+                append("$actionName: ${KeyEvent.keyCodeToString(event.keyCode)} (${event.keyCode})")
+                append(", Char: '${event.unicodeChar.toChar()}'")
+                append(", Unicode: ${event.unicodeChar}")
+                append(", Repeat: ${event.repeatCount}")
+            }
+            LogHelper.logInfo("KEYBOARD", keyInfo)
+        }
+
+        // Ignore key-repeat for navigation keys to prevent double navigation
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            if (event.repeatCount > 0 &&
+                (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT || event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)) {
+                return true
             }
 
             // Handle date navigation with arrow keys
@@ -706,6 +742,13 @@ class HomeActivity : AppCompatActivity() {
         return if (hour in 0..24) hour else null
     }
 
+    private fun replaceNowShortcuts(text: String): String {
+        // Replace @now or @n with current hour
+        val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        return text.replace("""@now\b""".toRegex(RegexOption.IGNORE_CASE), "@$currentHour")
+                   .replace("""@n\b""".toRegex(RegexOption.IGNORE_CASE), "@$currentHour")
+    }
+
     private fun loadTodos() {
         // Calculate date range: H-3 to H+3
         val calendar = Calendar.getInstance()
@@ -775,7 +818,7 @@ class HomeActivity : AppCompatActivity() {
 
     private fun updateActionBarWithLoading(isLoading: Boolean) {
         runOnUiThread {
-            val loadingEmoji = if (apiHelper is XhrProxyApiHelper) "⏳ " else "🔄 "
+            val loadingEmoji = "⏳ " // Hourglass emoji
             val baseTitle = formatDateForDisplay(currentDate)
 
             supportActionBar?.title = if (isLoading) {
@@ -884,6 +927,7 @@ class HomeActivity : AppCompatActivity() {
         if (!isSoundEnabled) return
 
         val fileName = if (allDone) "smb_stage_clear" else "smb_coin"
+        LogHelper.logInfo("SOUND", "playDoneSound called - allDone=$allDone, file=$fileName")
 
         // Try res/raw first
         val resId = resources.getIdentifier(fileName, "raw", packageName)
@@ -1043,6 +1087,7 @@ class HomeActivity : AppCompatActivity() {
                     val text = input.text.toString().trim()
                     if (text.isNotEmpty()) {
                         createNewTodo(text)
+                        lastActionTime = System.currentTimeMillis()
                         dialog.dismiss()
                     } else {
                         android.widget.Toast.makeText(this, "Todo text cannot be empty", android.widget.Toast.LENGTH_SHORT).show()
@@ -1059,6 +1104,7 @@ class HomeActivity : AppCompatActivity() {
                     val text = input.text.toString().trim()
                     if (text.isNotEmpty()) {
                         createNewTodo(text)
+                        lastActionTime = System.currentTimeMillis()
                         dialog.dismiss()
                     } else {
                         android.widget.Toast.makeText(this, "Todo text cannot be empty", android.widget.Toast.LENGTH_SHORT).show()
@@ -1068,6 +1114,24 @@ class HomeActivity : AppCompatActivity() {
                     false
                 }
             }
+
+            // Watch for newline being added to text (handles phones that don't trigger IME action)
+            input.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: android.text.Editable?) {
+                    if (s != null && s.isNotEmpty() && s.last() == '\n') {
+                        val text = s.toString().trim()
+                        if (text.isNotEmpty()) {
+                            createNewTodo(text)
+                            lastActionTime = System.currentTimeMillis()
+                            dialog.dismiss()
+                        } else {
+                            android.widget.Toast.makeText(this@HomeActivity, "Todo text cannot be empty", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            })
 
             container.addView(input)
             dialog.setContentView(container)
@@ -1079,10 +1143,13 @@ class HomeActivity : AppCompatActivity() {
                 clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             }
 
-            // Handle Back key to close (cancel)
+            // Handle Back key to close (cancel) and consume Enter to prevent leaking
             dialog.setOnKeyListener { d, keyCode, keyEvent ->
                 if (keyCode == android.view.KeyEvent.KEYCODE_BACK && keyEvent.action == android.view.KeyEvent.ACTION_UP) {
                     d.dismiss()
+                    true
+                } else if (keyCode == android.view.KeyEvent.KEYCODE_ENTER || keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER) {
+                    // Consume all Enter/DPAD_CENTER events to prevent leaking to main activity
                     true
                 } else {
                     false
@@ -1337,6 +1404,7 @@ class HomeActivity : AppCompatActivity() {
             if (isEnterKey || isImeDone) {
                 val newText = input.text.toString().trim()
                 if (newText.isNotEmpty()) {
+                    lastActionTime = System.currentTimeMillis()
                     updateTodoText(todo, newText) { dialog.dismiss() }
                 } else {
                     android.widget.Toast.makeText(this, "Todo text cannot be empty", android.widget.Toast.LENGTH_SHORT).show()
@@ -1352,6 +1420,7 @@ class HomeActivity : AppCompatActivity() {
             if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER && keyEvent.action == android.view.KeyEvent.ACTION_UP) {
                 val newText = input.text.toString().trim()
                 if (newText.isNotEmpty()) {
+                    lastActionTime = System.currentTimeMillis()
                     updateTodoText(todo, newText) { dialog.dismiss() }
                 } else {
                     android.widget.Toast.makeText(this, "Todo text cannot be empty", android.widget.Toast.LENGTH_SHORT).show()
@@ -1361,6 +1430,23 @@ class HomeActivity : AppCompatActivity() {
                 false
             }
         }
+
+        // Watch for newline being added to text (handles phones that don't trigger IME action)
+        input.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                if (s != null && s.isNotEmpty() && s.last() == '\n') {
+                    val newText = s.toString().trim()
+                    if (newText.isNotEmpty()) {
+                        lastActionTime = System.currentTimeMillis()
+                        updateTodoText(todo, newText) { dialog.dismiss() }
+                    } else {
+                        android.widget.Toast.makeText(this@HomeActivity, "Todo text cannot be empty", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        })
 
         container.addView(input)
         dialog.setContentView(container)
@@ -1375,6 +1461,9 @@ class HomeActivity : AppCompatActivity() {
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK && keyEvent.action == android.view.KeyEvent.ACTION_UP) {
                 d.dismiss()
                 true
+            } else if (keyCode == android.view.KeyEvent.KEYCODE_ENTER || keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER) {
+                // Consume all Enter/DPAD_CENTER events to prevent leaking to main activity
+                true
             } else {
                 false
             }
@@ -1387,12 +1476,15 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun updateTodoText(todo: TodoItem, newText: String, onDone: () -> Unit = {}) {
-        todoApi.updateTodo(workspaceId, todo.id, newText) { success, statusCode, response, responseTime ->
+        // Replace @now and @n with current hour
+        val finalText = replaceNowShortcuts(newText)
+
+        todoApi.updateTodo(workspaceId, todo.id, finalText) { success, statusCode, response, responseTime ->
             if (success) {
                 val index = todos.indexOfFirst { it.id == todo.id }
                 if (index != -1) {
                     runOnUiThread {
-                        todos[index] = todo.copy(text = newText)
+                        todos[index] = todo.copy(text = finalText)
                         adapter.notifyDataSetChanged()
                     }
                 }
@@ -1510,7 +1602,8 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun createNewTodo(text: String) {
-        var finalText = text
+        // Replace @now and @n with current hour
+        var finalText = replaceNowShortcuts(text)
 
         // If sequence mode is enabled, auto-assign hour tag
         if (isSequenceEnabled) {

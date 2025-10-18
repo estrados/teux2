@@ -17,15 +17,18 @@ interface ApiHelper {
 }
 
 /**
- * Factory to create API helpers
+ * Factory to create API helpers based on Android version
  */
 object ApiHelperFactory {
     fun create(context: Context): ApiHelper {
-        // Use WebView XHR proxy on KitKat (API 19) where TLS is problematic; otherwise use OkHttp
-        return if (android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.KITKAT) {
-            XhrProxyApiHelper(context)
-        } else {
+        // Android 5.0+ (API 21+) has modern TLS/SSL support - use OkHttp
+        // Android 4.4 (API 19-20) has SSL issues - use WebView XHR proxy
+        return if (android.os.Build.VERSION.SDK_INT >= 21) {
+            LogHelper.logInfo("ApiFactory", "Using OkHttpApiHelper (API ${android.os.Build.VERSION.SDK_INT})")
             OkHttpApiHelper(context)
+        } else {
+            LogHelper.logInfo("ApiFactory", "Using XhrProxyApiHelper (API ${android.os.Build.VERSION.SDK_INT})")
+            XhrProxyApiHelper(context)
         }
     }
 }
